@@ -17,7 +17,7 @@ Chrome拡張機能による英語学習支援ツールです。Webページ上�
 ### 開発者モードでのインストール
 1. このリポジトリをクローンまたはダウンロード
 ```bash
-git clone https://github.com/yourusername/english-learning-extension-v3.git
+git clone https://github.com/Olemi-llm-apprentice/english-pos-highlighter.git
 ```
 
 2. Chromeで `chrome://extensions/` を開く
@@ -74,7 +74,7 @@ assets/
 
 - 作者: [あなたの名前]
 - Email: [your-email@example.com]
-- GitHub: [https://github.com/yourusername](https://github.com/yourusername)
+- GitHub: [https://github.com/Olemi-llm-apprentice](https://github.com/Olemi-llm-apprentice)
 
 ## 🙏 謝辞
 
