@@ -1,0 +1,262 @@
+/* English Learning Assistant - 超シンプルスタイル */
+
+/* 品詞別の色分けスタイル - 下線のみ */
+.ela-noun {
+    text-decoration: underline;
+    text-decoration-color: #27ae60; /* 緑色 */
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-verb {
+    text-decoration: underline;
+    text-decoration-color: #3498db; /* 青色 */
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-adjective {
+    text-decoration: underline;
+    text-decoration-color: #f39c12;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-adverb {
+    text-decoration: underline;
+    text-decoration-color: #9b59b6;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-preposition {
+    text-decoration: underline;
+    text-decoration-color: #8b4513; /* 茶色 */
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-pronoun {
+    text-decoration: underline;
+    text-decoration-color: #e67e22;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-conjunction {
+    text-decoration: underline;
+    text-decoration-color: #7f8c8d; /* グレー色 */
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-determiner {
+    text-decoration: underline;
+    text-decoration-color: #6c757d; /* ダークグレー色 */
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.ela-other {
+    text-decoration: underline;
+    text-decoration-color: #95a5a6;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+/* 基本的な単語スタイル */
+.ela-word {
+    position: relative;
+    display: inline;
+    transition: opacity 0.2s ease;
+}
+
+.ela-word:hover {
+    opacity: 0.7;
+}
+
+/* 辞書ツールチップ */
+.ela-tooltip {
+    position: absolute;
+    z-index: 10000;
+    background: #2c3e50;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    max-width: 350px;
+    min-width: 200px;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s ease;
+    pointer-events: auto;
+    border: 1px solid #34495e;
+}
+
+.ela-tooltip.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.ela-tooltip::before {
+    content: '';
+    position: absolute;
+    top: -8px;
+    left: 20px;
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 8px solid #2c3e50;
+}
+
+.ela-tooltip-word {
+    font-weight: bold;
+    font-size: 16px;
+    margin-bottom: 4px;
+    color: #3498db;
+}
+
+.ela-tooltip-phonetic {
+    font-style: italic;
+    color: #bdc3c7;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.ela-tooltip-meaning {
+    margin-bottom: 8px;
+}
+
+.ela-tooltip-pos {
+    color: #e74c3c;
+    font-weight: 500;
+    font-size: 12px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.ela-tooltip-definition {
+    line-height: 1.4;
+    margin-bottom: 4px;
+}
+
+.ela-tooltip-example {
+    font-style: italic;
+    color: #95a5a6;
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.ela-tooltip-loading {
+    text-align: center;
+    color: #bdc3c7;
+    font-style: italic;
+}
+
+.ela-tooltip-error {
+    color: #e74c3c;
+    text-align: center;
+    font-style: italic;
+}
+
+/* 翻訳ボタン */
+.ela-translate-btn {
+    display: inline-block;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 15px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-left: 6px;
+    transition: all 0.3s ease;
+    box-shadow: 0 1px 4px rgba(102, 126, 234, 0.2);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    vertical-align: middle;
+    opacity: 0.8;
+}
+
+.ela-translate-btn:hover {
+    opacity: 1;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.ela-translate-btn.loading {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* 翻訳結果表示 */
+.ela-translation {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 10px;
+    margin: 6px 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    color: #495057;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.ela-translation-header {
+    font-weight: 600;
+    color: #6c757d;
+    font-size: 11px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ela-translation-text {
+    color: #212529;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+    .ela-tooltip {
+        max-width: 280px;
+        font-size: 13px;
+        padding: 10px 12px;
+    }
+    
+    .ela-translate-btn {
+        font-size: 10px;
+        padding: 3px 6px;
+    }
+    
+    .ela-translation {
+        font-size: 12px;
+        padding: 8px;
+    }
+}
+
+/* 印刷時のスタイル */
+@media print {
+    .ela-tooltip,
+    .ela-translate-btn,
+    .ela-translation {
+        display: none !important;
+    }
+    
+    .ela-word {
+        text-decoration: none !important;
+    }
+}
+
