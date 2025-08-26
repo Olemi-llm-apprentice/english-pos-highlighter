@@ -13,6 +13,8 @@ class EnglishLearningAssistant {
         this.tooltipElement = null;
         this.currentTooltipWord = null;
         this.hideTooltipTimer = null;
+        this.pageId = this.generatePageId();
+        this.paragraphTranslations = new Map();
         
         this.init();
     }
@@ -23,10 +25,21 @@ class EnglishLearningAssistant {
     }
     
     setupMessageListener() {
+        // Extension context invalidated チェック
+        if (!chrome.runtime?.id) {
+            console.warn('Extension context invalidated, skipping message listener setup');
+            return;
+        }
+        
         chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             this.handleMessage(message, sender, sendResponse);
             return true; // 非同期レスポンス
         });
+    }
+    
+    generatePageId() {
+        // ページのユニークIDを生成
+        return `page_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
     
     async handleMessage(message, sender, sendResponse) {
@@ -51,6 +64,11 @@ class EnglishLearningAssistant {
                     sendResponse({ success: true, isActive: this.isActive });
                     break;
                     
+                case 'BACKGROUND_TRANSLATION_COMPLETE':
+                    this.handleBackgroundTranslationComplete(message.pageId, message.translation);
+                    sendResponse({ success: true });
+                    break;
+                    
                 default:
                     sendResponse({ success: false, error: 'Unknown message type' });
             }
@@ -71,6 +89,9 @@ class EnglishLearningAssistant {
             
             // ページ処理を開始
             await this.processPage();
+            
+            // バックグラウンド翻訳を開始
+            this.startBackgroundTranslation();
             
             this.isActive = true;
             console.log('学習モードを開始しました');
@@ -455,6 +476,12 @@ class EnglishLearningAssistant {
     
     async lookupWord(word) {
         try {
+            // Extension context invalidated チェック
+            if (!chrome.runtime?.id) {
+                console.warn('Extension context invalidated, skipping API call');
+                return null;
+            }
+            
             const response = await chrome.runtime.sendMessage({
                 type: 'LOOKUP_WORD',
                 word: word
@@ -462,6 +489,10 @@ class EnglishLearningAssistant {
             
             return response && response.success ? response.definition : null;
         } catch (error) {
+            if (error.message.includes('Extension context invalidated')) {
+                console.warn('Extension context invalidated during word lookup');
+                return null;
+            }
             console.error('Word lookup error:', error);
             return null;
         }
@@ -609,31 +640,133 @@ class EnglishLearningAssistant {
         if (button.classList.contains('loading')) return;
         
         try {
+            // バックグラウンド翻訳のキャッシュから取得を試行
+            const cachedTranslation = this.getCachedTranslationForElement(element);
+            if (cachedTranslation) {
+                this.showInstantTranslation(element, button, cachedTranslation);
+                return;
+            }
+            
+            // キャッシュがない場合は翻訳中状態を表示
             button.classList.add('loading');
             button.textContent = '翻訳中...';
             
-            // 翻訳ボタンのテキストを除外
-            const textToTranslate = element.textContent.replace('翻訳中...', '').replace('翻訳', '').trim();
-            
-            const response = await chrome.runtime.sendMessage({
-                type: 'TRANSLATE_TEXT',
-                text: textToTranslate
-            });
-            
-            if (response && response.success && response.translation) {
-                this.showTranslationResult(element, textToTranslate, response.translation);
-            } else {
-                alert('翻訳に失敗しました: ' + (response?.error || '不明なエラー'));
+            // バックグラウンド翻訳が進行中の場合は待機
+            if (this.isBackgroundTranslationInProgress()) {
+                await this.waitForBackgroundTranslation(element, 5000); // 5秒待機
+                
+                // 再度キャッシュを確認
+                const retryTranslation = this.getCachedTranslationForElement(element);
+                if (retryTranslation) {
+                    this.showInstantTranslation(element, button, retryTranslation);
+                    return;
+                }
             }
+            
+            // フォールバック: 個別翻訳実行
+            await this.performIndividualTranslation(element, button);
             
         } catch (error) {
             console.error('Translation error:', error);
-            alert('翻訳でエラーが発生しました');
+            
+            if (error.message.includes('Extension context invalidated')) {
+                button.textContent = '拡張機能を再読み込みしてください';
+                button.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)';
+                button.disabled = true;
+            } else {
+                button.textContent = '翻訳エラー';
+                button.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
+            }
         } finally {
             button.classList.remove('loading');
-            button.textContent = '翻訳';
         }
     }
+    
+    // バックグラウンド翻訳進行中かチェック
+    isBackgroundTranslationInProgress() {
+        return this.paragraphTranslations && this.paragraphTranslations.size < 3; // 3つ未満の場合は進行中とみなす
+    }
+    
+    // バックグラウンド翻訳完了を待機
+    async waitForBackgroundTranslation(element, timeout = 5000) {
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < timeout) {
+            if (this.getCachedTranslationForElement(element)) {
+                return true;
+            }
+            await this.delay(500);
+        }
+        return false;
+    }
+    
+    // 要素に対応するキャッシュ翻訳を取得
+    getCachedTranslationForElement(element) {
+        if (!this.paragraphTranslations) return null;
+        
+        const elementText = this.extractCleanText(element);
+        
+        // 完全一致を探す
+        for (const [id, translation] of this.paragraphTranslations) {
+            if (translation.original === elementText) {
+                return translation.translation;
+            }
+        }
+        
+        // 部分一致を探す（最初の50文字で比較）
+        const elementStart = elementText.substring(0, 50);
+        for (const [id, translation] of this.paragraphTranslations) {
+            if (translation.original.substring(0, 50) === elementStart) {
+                return translation.translation;
+            }
+        }
+        
+        return null;
+    }
+    
+    // 個別翻訳を実行（フォールバック）
+    async performIndividualTranslation(element, button) {
+        const textToTranslate = this.extractCleanText(element);
+        
+        if (!chrome.runtime?.id) {
+            throw new Error('Extension context invalidated');
+        }
+        
+        const response = await chrome.runtime.sendMessage({
+            type: 'TRANSLATE_TEXT',
+            text: textToTranslate
+        });
+        
+        if (response && response.success && response.translation) {
+            this.showTranslationResult(element, textToTranslate, response.translation);
+            button.textContent = '翻訳完了';
+            button.style.background = 'linear-gradient(135deg, #27ae60 0%, #2ecc71 100%)';
+        } else {
+            throw new Error(response?.error || '翻訳に失敗しました');
+        }
+    }
+    
+    // 瞬時翻訳表示
+    showInstantTranslation(element, button, translation) {
+        try {
+            button.textContent = '✓ 表示済み';
+            button.style.background = 'linear-gradient(135deg, #3498db 0%, #2980b9 100%)';
+            
+            // 要素のテキストを抽出
+            const originalText = this.extractCleanText(element);
+            
+            // キャッシュされた翻訳を直接表示
+            this.showTranslationResult(element, originalText, translation);
+            console.log('Instant translation displayed from background cache');
+            
+        } catch (error) {
+            console.error('Instant translation error:', error);
+            // エラー時は個別翻訳にフォールバック
+            this.performIndividualTranslation(element, button);
+        }
+    }
+    
+
     
     showTranslationResult(element, originalText, translation) {
         // 既存の翻訳結果を削除
@@ -673,6 +806,137 @@ class EnglishLearningAssistant {
         
         // 処理済み要素のセットをクリア
         this.processedElements = new WeakSet();
+    }
+    
+    // バックグラウンド翻訳を開始
+    async startBackgroundTranslation() {
+        try {
+            // 翻訳対象の段落を抽出
+            const paragraphs = this.extractParagraphsForTranslation();
+            
+            if (paragraphs.length === 0) {
+                console.log('No paragraphs found for background translation');
+                return;
+            }
+            
+            console.log(`Starting background translation for ${paragraphs.length} paragraphs`);
+            
+            // 個別段落翻訳を開始
+            this.translateParagraphsIndividually(paragraphs);
+            
+        } catch (error) {
+            console.error('Failed to start background translation:', error);
+        }
+    }
+    
+    // 段落ごとの個別翻訳処理
+    async translateParagraphsIndividually(paragraphs) {
+        // 翻訳キャッシュを初期化
+        this.paragraphTranslations.clear();
+        
+        // 並行処理でAPI制限を考慮し、3つずつ処理
+        for (let i = 0; i < paragraphs.length; i += 3) {
+            const batch = paragraphs.slice(i, i + 3);
+            
+            const promises = batch.map(async (paragraph) => {
+                try {
+                    // 遅延を入れてAPI制限を回避
+                    await this.delay(i * 100);
+                    
+                    // Extension context チェック
+                    if (!chrome.runtime?.id) {
+                        throw new Error('Extension context invalidated');
+                    }
+                    
+                    const response = await chrome.runtime.sendMessage({
+                        type: 'TRANSLATE_TEXT',
+                        text: paragraph.text
+                    });
+                    
+                    if (response && response.success) {
+                        this.paragraphTranslations.set(paragraph.id, {
+                            original: paragraph.text,
+                            translation: response.translation,
+                            element: paragraph.element
+                        });
+                        
+                        // 翻訳完了した段落の翻訳ボタンを更新
+                        this.updateParagraphButtonState(paragraph.element);
+                    }
+                } catch (error) {
+                    if (error.message.includes('Extension context invalidated')) {
+                        console.warn(`Extension context invalidated for paragraph ${paragraph.id}`);
+                        // バックグラウンド翻訳を停止
+                        return;
+                    }
+                    console.error(`Translation failed for paragraph ${paragraph.id}:`, error);
+                }
+            });
+            
+            await Promise.all(promises);
+        }
+        
+        console.log(`Background translation completed for ${this.paragraphTranslations.size} paragraphs`);
+    }
+    
+    // 遅延ユーティリティ
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    // 個別段落の翻訳ボタン状態を更新
+    updateParagraphButtonState(element) {
+        const button = element.querySelector('.ela-translate-btn');
+        if (button) {
+            button.style.background = 'linear-gradient(135deg, #27ae60 0%, #2ecc71 100%)';
+            button.title = '翻訳準備完了 - クリックで瞬時表示';
+        }
+    }
+    
+    // 翻訳用の段落を抽出
+    extractParagraphsForTranslation() {
+        const paragraphs = [];
+        let paragraphId = 0;
+        
+        // 翻訳ボタンがある要素を対象にする
+        const elementsWithTranslateBtn = document.querySelectorAll('.ela-translate-btn');
+        
+        elementsWithTranslateBtn.forEach(button => {
+            const element = button.parentElement;
+            const text = this.extractCleanText(element);
+            
+            if (text.length > 20 && this.isEnglishText(text)) {
+                paragraphs.push({
+                    id: `para_${paragraphId++}`,
+                    text: text,
+                    element: element
+                });
+            }
+        });
+        
+        console.log(`Found ${paragraphs.length} paragraphs with translation buttons`);
+        return paragraphs;
+    }
+    
+    // 要素からクリーンなテキストを抽出
+    extractCleanText(element) {
+        // 翻訳ボタンのテキストを除外
+        const clone = element.cloneNode(true);
+        const buttons = clone.querySelectorAll('.ela-translate-btn, .ela-translation');
+        buttons.forEach(btn => btn.remove());
+        
+        return clone.textContent.trim();
+    }
+    
+    // 英語テキストかどうかの簡易判定
+    isEnglishText(text) {
+        const englishWords = text.match(/\b[a-zA-Z]+\b/g);
+        return englishWords && englishWords.length > 3;
+    }
+    
+    // バックグラウンド翻訳完了の処理（非推奨、個別翻訳使用）
+    handleBackgroundTranslationComplete(pageId, translation) {
+        console.log('Background translation complete message received, but using individual paragraph translation');
     }
 }
 

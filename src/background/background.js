@@ -1,6 +1,8 @@
 // Background Service Worker - シンプル・安定版
 class BackgroundService {
     constructor() {
+        this.translationCache = new Map(); // 翻訳キャッシュ
+        this.processingQueue = new Map();  // 処理中キュー
         this.init();
     }
     
@@ -54,6 +56,16 @@ class BackgroundService {
                 case 'TRANSLATE_TEXT':
                     const translation = await this.translateText(message.text);
                     sendResponse(translation);
+                    break;
+                    
+                case 'START_BACKGROUND_TRANSLATION':
+                    this.startBackgroundTranslation(message.pageId, message.sentences);
+                    sendResponse({ success: true, message: 'Background translation started' });
+                    break;
+                    
+                case 'GET_CACHED_TRANSLATION':
+                    const cached = this.getCachedTranslation(message.text);
+                    sendResponse(cached);
                     break;
                     
                 default:
@@ -326,6 +338,106 @@ class BackgroundService {
         
         const lowerText = text.toLowerCase();
         return translations[lowerText] || `[翻訳] ${text}`;
+    }
+    
+    // バックグラウンド全体翻訳を開始
+    async startBackgroundTranslation(pageId, sentences) {
+        try {
+            console.log(`Starting background translation for page: ${pageId}`);
+            
+            // 既に処理中の場合はスキップ
+            if (this.processingQueue.has(pageId)) {
+                console.log(`Page ${pageId} is already being processed`);
+                return;
+            }
+            
+            // 処理中フラグを設定
+            this.processingQueue.set(pageId, true);
+            
+            // 文章を結合して全体翻訳
+            const fullText = sentences.join(' ');
+            
+            // キャッシュ確認
+            const cacheKey = this.generateCacheKey(fullText);
+            if (this.translationCache.has(cacheKey)) {
+                console.log(`Translation found in cache for page: ${pageId}`);
+                this.processingQueue.delete(pageId);
+                return;
+            }
+            
+            // 翻訳実行
+            console.log(`Translating ${sentences.length} sentences for page: ${pageId}`);
+            const translationResult = await this.translateText(fullText);
+            
+            if (translationResult.success) {
+                // キャッシュに保存
+                this.translationCache.set(cacheKey, {
+                    translation: translationResult.translation,
+                    timestamp: Date.now(),
+                    pageId: pageId
+                });
+                
+                console.log(`Background translation completed for page: ${pageId}`);
+                
+                // コンテンツスクリプトに完了通知
+                this.notifyTranslationComplete(pageId, translationResult.translation);
+            }
+            
+        } catch (error) {
+            console.error(`Background translation error for page ${pageId}:`, error);
+        } finally {
+            this.processingQueue.delete(pageId);
+        }
+    }
+    
+    // キャッシュから翻訳結果を取得
+    getCachedTranslation(text) {
+        const cacheKey = this.generateCacheKey(text);
+        const cached = this.translationCache.get(cacheKey);
+        
+        if (cached) {
+            // 1時間でキャッシュ期限切れ
+            const isExpired = Date.now() - cached.timestamp > 3600000;
+            if (!isExpired) {
+                return {
+                    success: true,
+                    translation: cached.translation,
+                    cached: true
+                };
+            } else {
+                this.translationCache.delete(cacheKey);
+            }
+        }
+        
+        return { success: false, cached: false };
+    }
+    
+    // キャッシュキー生成
+    generateCacheKey(text) {
+        // テキストのハッシュを生成（簡易版）
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) {
+            const char = text.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // 32bit整数に変換
+        }
+        return `translation_${Math.abs(hash)}`;
+    }
+    
+    // 翻訳完了をコンテンツスクリプトに通知
+    async notifyTranslationComplete(pageId, translation) {
+        try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tabs.length > 0) {
+                chrome.tabs.sendMessage(tabs[0].id, {
+                    type: 'BACKGROUND_TRANSLATION_COMPLETE',
+                    pageId: pageId,
+                    translation: translation
+                });
+            }
+        } catch (error) {
+            console.error('Failed to notify translation complete:', error);
+        }
     }
 }
 
