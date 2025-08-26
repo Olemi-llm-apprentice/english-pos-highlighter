@@ -139,12 +139,55 @@
     margin-bottom: 8px;
 }
 
+/* 品詞表示 - 各品詞の色に対応 */
 .ela-tooltip-pos {
-    color: #e74c3c;
-    font-weight: 500;
-    font-size: 12px;
-    text-transform: uppercase;
-    margin-bottom: 4px;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 6px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+/* 品詞別の色設定 */
+.ela-tooltip-pos.noun {
+    color: #27ae60;
+    background: rgba(39, 174, 96, 0.1);
+}
+
+.ela-tooltip-pos.verb {
+    color: #3498db;
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.ela-tooltip-pos.adjective {
+    color: #f39c12;
+    background: rgba(243, 156, 18, 0.1);
+}
+
+.ela-tooltip-pos.adverb {
+    color: #9b59b6;
+    background: rgba(155, 89, 182, 0.1);
+}
+
+.ela-tooltip-pos.preposition {
+    color: #8b4513;
+    background: rgba(139, 69, 19, 0.1);
+}
+
+.ela-tooltip-pos.pronoun {
+    color: #e67e22;
+    background: rgba(230, 126, 34, 0.1);
+}
+
+.ela-tooltip-pos.conjunction {
+    color: #7f8c8d;
+    background: rgba(127, 140, 141, 0.1);
+}
+
+.ela-tooltip-pos.determiner {
+    color: #6c757d;
+    background: rgba(108, 117, 125, 0.1);
 }
 
 .ela-tooltip-definition {
@@ -169,6 +212,145 @@
     color: #e74c3c;
     text-align: center;
     font-style: italic;
+}
+
+/* LLM解析結果用の新しいスタイル */
+.ela-tooltip-basic-meaning {
+    background: rgba(46, 204, 113, 0.08);
+    border: 1px solid rgba(46, 204, 113, 0.2);
+    border-left: 4px solid #2ecc71;
+    padding: 10px 12px;
+    margin: 8px 0;
+    border-radius: 6px;
+    line-height: 1.5;
+}
+
+.ela-tooltip-basic-meaning strong {
+    color: #2ecc71;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.ela-tooltip-llm-meaning {
+    background: rgba(52, 152, 219, 0.08);
+    border: 1px solid rgba(52, 152, 219, 0.2);
+    border-left: 4px solid #3498db;
+    padding: 10px 12px;
+    margin: 8px 0;
+    border-radius: 6px;
+    line-height: 1.5;
+}
+
+.ela-tooltip-llm-meaning strong {
+    color: #3498db;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.ela-tooltip-examples {
+    margin: 8px 0 4px 0;
+    color: #f39c12;
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.ela-tooltip-example {
+    background: rgba(245, 249, 253, 0.95);
+    border: 1px solid rgba(52, 152, 219, 0.2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    font-size: 13px;
+    line-height: 1.4;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.ela-example-english {
+    font-style: italic;
+    color: #2c3e50;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.ela-example-japanese {
+    color: #5d6d7e;
+    font-size: 12px;
+    font-weight: 500;
+    border-top: 1px solid rgba(52, 152, 219, 0.15);
+    padding-top: 4px;
+}
+
+.ela-highlight-word {
+    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+    color: white;
+    font-weight: bold;
+    padding: 2px 4px;
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.ela-tooltip-context {
+    background: rgba(155, 89, 182, 0.06);
+    border: 1px solid rgba(155, 89, 182, 0.2);
+    border-left: 4px solid #9b59b6;
+    padding: 10px 12px;
+    margin: 8px 0;
+    border-radius: 6px;
+    line-height: 1.5;
+    font-size: 12px;
+}
+
+.ela-tooltip-context strong {
+    color: #9b59b6;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.ela-tooltip-phrase-type {
+    background: rgba(230, 126, 34, 0.1);
+    border-left: 3px solid #e67e22;
+    padding: 6px 8px;
+    margin: 6px 0;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.ela-tooltip-phrase-type strong {
+    color: #e67e22;
+}
+
+.ela-tooltip-source {
+    text-align: right;
+    font-size: 11px;
+    color: #95a5a6;
+    margin-top: 8px;
+    border-top: 1px solid #4a5568;
+    padding-top: 6px;
+    font-style: italic;
+}
+
+/* 信頼度によるビジュアル表示 */
+.ela-word[data-confidence] {
+    position: relative;
+}
+
+.ela-word[data-confidence]:after {
+    content: attr(data-confidence);
+    position: absolute;
+    top: -12px;
+    right: -8px;
+    background: #27ae60;
+    color: white;
+    font-size: 8px;
+    padding: 1px 3px;
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.ela-word[data-confidence]:hover:after {
+    opacity: 0.8;
 }
 
 /* 翻訳ボタン */
