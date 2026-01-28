@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Analysis Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .input-text {
+            background: #e3f2fd;
+            padding: 15px;
+            border-left: 4px solid #2196f3;
+            margin: 10px 0;
+            font-style: italic;
+        }
+        .word-analysis {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .word-card {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 12px;
+        }
+        .word-title {
+            font-weight: bold;
+            color: #495057;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+        .pos-tag {
+            display: inline-block;
+            background: #6c757d;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        .meaning {
+            margin: 5px 0;
+            line-height: 1.4;
+        }
+        .examples {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #dee2e6;
+        }
+        .example {
+            margin: 5px 0;
+            padding: 5px;
+            background: #fff;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        .japanese {
+            color: #6c757d;
+            font-style: italic;
+        }
+        .coverage-stats {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .missing-words {
+            background: #ffe8e8;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .result-section {
+            margin-top: 30px;
+            display: none;
+        }
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 LLM Analysis Coverage Test</h1>
+        <p>このテストでは、入力テキストの全ての単語がLLM解析結果に含まれているかを確認します。</p>
+        
+        <div id="extension-status" style="padding: 10px; margin: 10px 0; border-radius: 6px;">
+            <div id="status-text">🔍 Checking extension status...</div>
+        </div>
+        
+        <h3>Test Sentences:</h3>
+        <div class="test-sentences">
+            <div class="input-text" data-text="The quick brown fox jumps over the lazy dog.">
+                📝 Simple: "The quick brown fox jumps over the lazy dog."
+                <button class="test-button" onclick="testSentence('The quick brown fox jumps over the lazy dog.')">Test This</button>
+            </div>
+            <div class="input-text" data-text="Machine learning algorithms are revolutionizing artificial intelligence in healthcare.">
+                📝 Technical: "Machine learning algorithms are revolutionizing artificial intelligence in healthcare."
+                <button class="test-button" onclick="testSentence('Machine learning algorithms are revolutionizing artificial intelligence in healthcare.')">Test This</button>
+            </div>
+            <div class="input-text" data-text="I can't believe you're giving up on your dreams just because of a few setbacks.">
+                📝 Contractions: "I can't believe you're giving up on your dreams just because of a few setbacks."
+                <button class="test-button" onclick="testSentence(`I can't believe you're giving up on your dreams just because of a few setbacks.`)">Test This</button>
+            </div>
+            <div class="input-text" data-text="The state-of-the-art technology enables real-time data processing and decision-making capabilities.">
+                📝 Complex: "The state-of-the-art technology enables real-time data processing and decision-making capabilities."
+                <button class="test-button" onclick="testSentence('The state-of-the-art technology enables real-time data processing and decision-making capabilities.')">Test This</button>
+            </div>
+        </div>
+        
+        <div id="loading" class="loading" style="display: none;">
+            <div>🔄 Analyzing with LLM...</div>
+            <div>Please wait while we process the text...</div>
+        </div>
+        
+        <div id="results" class="result-section">
+            <h3>📊 Analysis Results</h3>
+            
+            <div class="coverage-stats">
+                <h4>📈 Coverage Statistics</h4>
+                <div id="coverage-info"></div>
+            </div>
+            
+            <div id="missing-words-section" class="missing-words" style="display: none;">
+                <h4>❌ Missing Words</h4>
+                <div id="missing-words"></div>
+            </div>
+            
+            <div class="word-analysis">
+                <div id="word-results"></div>
+            </div>
+            
+            <div style="margin-top: 30px;">
+                <h4>🔍 Raw LLM Response</h4>
+                <details>
+                    <summary>Click to see raw JSON response</summary>
+                    <pre id="raw-response" style="background: #f8f9fa; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 12px;"></pre>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentAnalysis = null;
+        
+        function extractWords(text) {
+            // 単語を抽出（句読点を除去）
+            return text.toLowerCase()
+                      .replace(/[.,!?;:"()]/g, '')
+                      .split(/\s+/)
+                      .filter(word => word.length > 0);
+        }
+        
+        function getPosColor(pos) {
+            const colors = {
+                'noun': '#28a745',
+                'verb': '#dc3545', 
+                'adjective': '#17a2b8',
+                'adverb': '#ffc107',
+                'preposition': '#6f42c1',
+                'pronoun': '#fd7e14',
+                'conjunction': '#20c997',
+                'determiner': '#6c757d'
+            };
+            return colors[pos] || '#6c757d';
+        }
+        
+        async function testSentence(text) {
+            console.log('🧪 Testing sentence:', text);
+            
+            // Show loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            
+            try {
+                // Simulate the actual LLM analysis call that would happen in the extension
+                const mockResponse = await simulateLLMAnalysis(text);
+                
+                // Analyze coverage
+                const inputWords = extractWords(text);
+                const analyzedWords = mockResponse.words ? mockResponse.words.map(w => w.word.toLowerCase()) : [];
+                
+                const missingWords = inputWords.filter(word => !analyzedWords.includes(word));
+                const coverage = ((inputWords.length - missingWords.length) / inputWords.length * 100).toFixed(1);
+                
+                // Display results
+                displayResults(text, mockResponse, inputWords, missingWords, coverage);
+                
+            } catch (error) {
+                console.error('❌ Test failed:', error);
+                alert('Test failed: ' + error.message);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+        
+        async function simulateLLMAnalysis(text) {
+            console.log('📤 Input to LLM:', text);
+            
+            // Check if we're running in extension context
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                console.log('🔗 Using actual Chrome extension API');
+                
+                return new Promise((resolve, reject) => {
+                    const messageToBackground = {
+                        type: 'ANALYZE_TEXT_WITH_LLM',
+                        pageId: 'test-page',
+                        sentences: [text],
+                        paragraphId: 'test-paragraph'
+                    };
+                    
+                    console.log('📧 Sending message to background:', messageToBackground);
+                    
+                    chrome.runtime.sendMessage(messageToBackground, (response) => {
+                        if (chrome.runtime.lastError) {
+                            console.error('❌ Chrome runtime error:', chrome.runtime.lastError);
+                            reject(new Error(chrome.runtime.lastError.message));
+                            return;
+                        }
+                        
+                        console.log('📥 Response from background:', response);
+                        
+                        if (response && response.success) {
+                            resolve(response.analysis);
+                        } else {
+                            reject(new Error(response?.error || 'API call failed'));
+                        }
+                    });
+                });
+            } else {
+                console.log('🔧 Using mock data (not in extension context)');
+                
+                // Create more realistic mock data that covers all words
+                const words = extractWords(text);
+                const mockWords = words.map((word, index) => {
+                    const posTypes = ['noun', 'verb', 'adjective', 'adverb', 'preposition', 'pronoun', 'conjunction', 'determiner'];
+                    const randomPos = posTypes[index % posTypes.length];
+                    
+                    return {
+                        word: word,
+                        pos: randomPos,
+                        basic_meaning: `Mock meaning for ${word}`,
+                        contextual_meaning: `Contextual meaning of ${word} in this sentence`,
+                        examples: [
+                            {
+                                english: `Example sentence with **${word}**.`,
+                                japanese: `**${word}**を含む例文。`
+                            },
+                            {
+                                english: `Another example using **${word}**.`,
+                                japanese: `**${word}**を使った別の例文。`
+                            }
+                        ],
+                        confidence: 0.85 + (Math.random() * 0.14), // 0.85-0.99
+                        context_notes: `Grammar note for ${word} in this context`
+                    };
+                });
+                
+                const mockResponse = {
+                    words: mockWords,
+                    phrases: [
+                        {
+                            phrase: "machine learning",
+                            type: "collocation",
+                            basic_meaning: "機械学習",
+                            contextual_meaning: "人工知能の一分野",
+                            examples: [
+                                {
+                                    english: "**Machine learning** is transforming industries.",
+                                    japanese: "**機械学習**は産業を変革している。"
+                                }
+                            ]
+                        }
+                    ]
+                };
+                
+                // Add a delay to simulate API call
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                return mockResponse;
+            }
+        }
+        
+        function displayResults(inputText, analysis, inputWords, missingWords, coverage) {
+            document.getElementById('results').style.display = 'block';
+            
+            // Coverage info
+            const coverageInfo = document.getElementById('coverage-info');
+            coverageInfo.innerHTML = `
+                <div><strong>Input text:</strong> "${inputText}"</div>
+                <div><strong>Total words in input:</strong> ${inputWords.length}</div>
+                <div><strong>Words analyzed by LLM:</strong> ${analysis.words ? analysis.words.length : 0}</div>
+                <div><strong>Coverage:</strong> ${coverage}%</div>
+                <div><strong>Missing words:</strong> ${missingWords.length}</div>
+            `;
+            
+            // Missing words
+            const missingSection = document.getElementById('missing-words-section');
+            const missingDiv = document.getElementById('missing-words');
+            if (missingWords.length > 0) {
+                missingSection.style.display = 'block';
+                missingDiv.innerHTML = `
+                    <div>These words were not found in the LLM analysis:</div>
+                    <div style="margin-top: 10px; font-family: monospace; background: white; padding: 10px; border-radius: 4px;">
+                        ${missingWords.map(word => `<span style="background: #ffebee; padding: 2px 6px; margin: 2px; border-radius: 3px;">${word}</span>`).join(' ')}
+                    </div>
+                `;
+            } else {
+                missingSection.style.display = 'none';
+            }
+            
+            // Word analysis results
+            const wordResults = document.getElementById('word-results');
+            if (analysis.words && analysis.words.length > 0) {
+                wordResults.innerHTML = analysis.words.map(word => `
+                    <div class="word-card">
+                        <div class="word-title">${word.word}</div>
+                        <div class="pos-tag" style="background-color: ${getPosColor(word.pos)}">${word.pos}</div>
+                        <div class="meaning"><strong>Basic:</strong> ${word.basic_meaning || 'N/A'}</div>
+                        <div class="meaning"><strong>Context:</strong> ${word.contextual_meaning || 'N/A'}</div>
+                        <div class="meaning"><strong>Notes:</strong> ${word.context_notes || 'N/A'}</div>
+                        ${word.examples && word.examples.length > 0 ? `
+                            <div class="examples">
+                                <strong>Examples:</strong>
+                                ${word.examples.map(ex => `
+                                    <div class="example">
+                                        <div>${ex.english}</div>
+                                        <div class="japanese">${ex.japanese}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('');
+            } else {
+                wordResults.innerHTML = '<div style="text-align: center; padding: 50px; color: #6c757d;">No word analysis found in response</div>';
+            }
+            
+            // Raw response
+            document.getElementById('raw-response').textContent = JSON.stringify(analysis, null, 2);
+        }
+        
+        // Check extension status
+        function checkExtensionStatus() {
+            const statusDiv = document.getElementById('extension-status');
+            const statusText = document.getElementById('status-text');
+            
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                statusDiv.style.backgroundColor = '#e8f5e8';
+                statusDiv.style.border = '1px solid #28a745';
+                statusText.innerHTML = '✅ Extension detected! Tests will use actual LLM API calls.';
+                
+                // Test connection
+                chrome.runtime.sendMessage({type: 'CONTEXT_CHECK'}, (response) => {
+                    if (chrome.runtime.lastError) {
+                        statusDiv.style.backgroundColor = '#ffe8e8';
+                        statusDiv.style.border = '1px solid #dc3545';
+                        statusText.innerHTML = '❌ Extension detected but not responding. Using mock data.';
+                    } else {
+                        statusText.innerHTML = '✅ Extension connected and ready! Tests will use actual LLM API.';
+                    }
+                });
+            } else {
+                statusDiv.style.backgroundColor = '#fff3cd';
+                statusDiv.style.border = '1px solid #ffc107';
+                statusText.innerHTML = `
+                    ⚠️ Chrome extension not detected. Using mock data for demonstration.<br>
+                    <small>To test with actual LLM: Open this page from a website where the extension is active.</small>
+                `;
+            }
+        }
+        
+        // Initialize with the first test
+        window.onload = function() {
+            console.log('🚀 LLM Analysis Test Page Loaded');
+            console.log('📋 Available test sentences:', document.querySelectorAll('.input-text').length);
+            checkExtensionStatus();
+        };
+    </script>
+</body>
+</html>

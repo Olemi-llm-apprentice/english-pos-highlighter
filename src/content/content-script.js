@@ -1,4 +1,6 @@
 // English Learning Assistant - Content Script (シンプル・安定版)
+console.log('🚀 Content script file loaded');
+
 class EnglishLearningAssistant {
     constructor() {
         this.isActive = false;
@@ -20,6 +22,8 @@ class EnglishLearningAssistant {
         this.contextInvalidated = false;     // コンテキスト無効化フラグ
         this.dictionaryCache = new Map();    // 辞書結果キャッシュ
         this.pendingRequests = new Map();   // 進行中のリクエスト追跡
+        this.logBuffer = [];                 // Content script ログバッファ
+        this.maxLogEntries = 500;            // Content script ログ保持数
         
         // キャッシュサイズ設定（調整可能）
         this.MAX_DICTIONARY_CACHE = 2000;
@@ -28,11 +32,139 @@ class EnglishLearningAssistant {
         this.init();
         this.setupContextMonitoring();
         this.setupCacheMonitoring();
+        // フォールバック機能は無効化（LLM解析のみ使用）
     }
     
     init() {
         this.setupMessageListener();
+        this.setupLoggingSystem();
         console.log('English Learning Assistant initialized');
+    }
+    
+    // ログシステムのセットアップ
+    setupLoggingSystem() {
+        // グローバルなログ監視コマンドを追加
+        window.ELA_DEBUG = {
+            // ログ取得
+            getLogs: async (filter = {}, limit = 100) => {
+                try {
+                    const response = await this.sendMessageWithTimeout({
+                        type: 'GET_LOGS',
+                        filter: filter,
+                        limit: limit
+                    }, 5000);
+                    
+                    if (response.success) {
+                        console.table(response.logs);
+                        return response.logs;
+                    } else {
+                        console.error('Failed to get logs:', response.error);
+                        return null;
+                    }
+                } catch (error) {
+                    console.error('Error getting logs:', error);
+                    return null;
+                }
+            },
+            
+            // エラーログのみ取得
+            getErrors: async (limit = 50) => {
+                return await window.ELA_DEBUG.getLogs({ level: 'ERROR' }, limit);
+            },
+            
+            // 最近のログ取得（最近N分）
+            getRecent: async (minutes = 10, limit = 100) => {
+                return await window.ELA_DEBUG.getLogs({ minutes: minutes }, limit);
+            },
+            
+            // ログ検索
+            search: async (searchTerm, limit = 100) => {
+                return await window.ELA_DEBUG.getLogs({ search: searchTerm }, limit);
+            },
+            
+            // ログをファイルでダウンロード
+            exportLogs: async () => {
+                try {
+                    const response = await this.sendMessageWithTimeout({
+                        type: 'EXPORT_LOGS'
+                    }, 10000);
+                    
+                    if (response.success) {
+                        // ダウンロード実行
+                        const a = document.createElement('a');
+                        a.href = response.downloadUrl;
+                        a.download = response.filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        
+                        console.log(`Exported ${response.logCount} log entries to ${response.filename}`);
+                        return response;
+                    } else {
+                        console.error('Failed to export logs:', response.error);
+                        return null;
+                    }
+                } catch (error) {
+                    console.error('Error exporting logs:', error);
+                    return null;
+                }
+            },
+            
+            // ログクリア
+            clearLogs: async () => {
+                try {
+                    const response = await this.sendMessageWithTimeout({
+                        type: 'CLEAR_LOGS'
+                    }, 5000);
+                    
+                    if (response.success) {
+                        console.log('Logs cleared successfully');
+                        return true;
+                    } else {
+                        console.error('Failed to clear logs:', response.error);
+                        return false;
+                    }
+                } catch (error) {
+                    console.error('Error clearing logs:', error);
+                    return false;
+                }
+            },
+            
+            // デバッグ情報表示
+            status: () => {
+                console.log('🔍 English Learning Assistant Debug Status');
+                console.log(`📄 Page ID: ${this.pageId}`);
+                console.log(`🔄 Analysis in progress: ${this.analysisInProgress}`);
+                console.log(`❌ Context invalidated: ${this.contextInvalidated}`);
+                console.log(`📚 Dictionary cache: ${this.dictionaryCache.size} entries`);
+                console.log(`🤖 LLM cache: ${this.llmAnalysisResults.size} entries`);
+                console.log(`⏳ Pending requests: ${this.pendingRequests.size}`);
+                console.log('');
+                console.log('📋 Available commands:');
+                console.log('  ELA_DEBUG.getLogs() - Get all logs');
+                console.log('  ELA_DEBUG.getErrors() - Get error logs only');
+                console.log('  ELA_DEBUG.getRecent(10) - Get logs from last 10 minutes');
+                console.log('  ELA_DEBUG.search("keyword") - Search logs');
+                console.log('  ELA_DEBUG.exportLogs() - Download logs as file');
+                console.log('  ELA_DEBUG.clearLogs() - Clear all logs');
+                console.log('  ELA_DEBUG.status() - Show this status');
+            }
+        };
+        
+        console.log('🔍 ELA Debug system initialized. Type ELA_DEBUG.status() for commands.');
+        
+        // デバッグ確認用のグローバル変数も設定
+        window.ELA_EXTENSION_LOADED = true;
+        window.ELA_VERSION = '3.0.0';
+        
+        // 緊急時のデバッグ情報表示
+        window.checkELA = () => {
+            console.log('✅ English Learning Assistant is loaded');
+            console.log(`📦 Version: ${window.ELA_VERSION}`);
+            console.log(`🆔 Page ID: ${this.pageId}`);
+            console.log(`🔧 ELA_DEBUG available: ${typeof window.ELA_DEBUG !== 'undefined'}`);
+            console.log('Use ELA_DEBUG.status() for full debug info');
+        };
     }
     
     setupMessageListener() {
@@ -67,18 +199,11 @@ class EnglishLearningAssistant {
     }
     
     setupContextMonitoring() {
-        // 定期的にExtension contextをチェック
-        this.contextCheckInterval = setInterval(() => {
-            if (!chrome.runtime?.id) {
-                if (!this.contextInvalidated) {
-                    console.warn('Extension context invalidated detected');
-                    this.contextInvalidated = true;
-                    this.handleContextInvalidation();
-                }
-            }
-        }, 5000); // 5秒ごとにチェック
+        // Extension context監視を無効化（問題の根本的解決）
+        // 代わりに実際のメッセージ送信時にのみエラーハンドリング
+        console.log('Extension context monitoring disabled - using on-demand error handling');
         
-        // ページ離脱時にクリーンアップ
+        // ページ離脱時のクリーンアップのみ維持
         window.addEventListener('beforeunload', () => {
             if (this.contextCheckInterval) {
                 clearInterval(this.contextCheckInterval);
@@ -87,141 +212,20 @@ class EnglishLearningAssistant {
     }
     
     handleContextInvalidation() {
-        console.warn('Handling extension context invalidation');
+        console.warn('Extension context invalidated - switching to lightweight mode');
         
-        // 進行中の処理を停止
+        // フラグのみ設定（過度な処理を避ける）
+        this.contextInvalidated = true;
         this.analysisInProgress = false;
-        
-        // ツールチップを非表示
-        this.hideTooltip();
-        
-        // タイマーをクリア
-        if (this.hideTooltipTimer) {
-            clearTimeout(this.hideTooltipTimer);
-            this.hideTooltipTimer = null;
-        }
-        
-        // インターバルをクリア
-        if (this.contextCheckInterval) {
-            clearInterval(this.contextCheckInterval);
-            this.contextCheckInterval = null;
-        }
-        
-        // キャッシュ監視インターバルをクリア
-        if (this.cacheMonitoringInterval) {
-            clearInterval(this.cacheMonitoringInterval);
-            this.cacheMonitoringInterval = null;
-        }
         
         // 進行中のリクエストをクリア
         this.pendingRequests.clear();
         
-        // ユーザーに状況を通知するバナーを表示
-        this.showContextInvalidationNotice();
-        
-        // 可能な限りローカル機能を維持
-        this.enableOfflineMode();
+        // 軽量通知のみ（大げさなバナーは避ける）
+        console.warn('Extension functions may be limited until reload');
     }
     
-    showContextInvalidationNotice() {
-        // 既存の通知がある場合は削除
-        const existingNotice = document.getElementById('ela-context-invalidation-notice');
-        if (existingNotice) {
-            existingNotice.remove();
-        }
-        
-        const notice = document.createElement('div');
-        notice.id = 'ela-context-invalidation-notice';
-        notice.style.cssText = `
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: #ff6b6b;
-            color: white;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            z-index: 10001;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-            max-width: 350px;
-            line-height: 1.4;
-        `;
-        notice.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span>⚠️</span>
-                <div>
-                    <div style="font-weight: 600;">拡張機能が再読み込みされました</div>
-                    <div style="font-size: 12px; opacity: 0.9;">基本機能のみ利用可能です</div>
-                </div>
-                <button style="background: none; border: none; color: white; font-size: 18px; cursor: pointer; padding: 0; margin-left: auto;" onclick="this.parentElement.parentElement.remove()">×</button>
-            </div>
-        `;
-        
-        document.body.appendChild(notice);
-        
-        // 10秒後に自動で非表示
-        setTimeout(() => {
-            if (notice.parentElement) {
-                notice.remove();
-            }
-        }, 10000);
-    }
-    
-    enableOfflineMode() {
-        console.warn('Enabling offline mode - limited functionality');
-        
-        // オフライン辞書機能を有効化（既存のDOM要素から情報を取得）
-        this.offlineMode = true;
-        
-        // 簡易ツールチップ機能を維持
-        this.setupOfflineTooltips();
-    }
-    
-    setupOfflineTooltips() {
-        // 既存の単語要素に簡易ツールチップを設定
-        const wordElements = document.querySelectorAll('.ela-word');
-        wordElements.forEach(element => {
-            if (!element.hasAttribute('data-offline-tooltip')) {
-                element.setAttribute('data-offline-tooltip', 'true');
-                element.addEventListener('mouseenter', (e) => {
-                    this.showOfflineTooltip(e.target);
-                });
-                element.addEventListener('mouseleave', () => {
-                    this.hideTooltip();
-                });
-            }
-        });
-    }
-    
-    showOfflineTooltip(wordElement) {
-        const word = wordElement.textContent.trim();
-        
-        // 基本的な単語情報を表示（品詞クラスから推測）
-        const posClass = Array.from(wordElement.classList).find(cls => 
-            ['noun', 'verb', 'adjective', 'adverb', 'preposition', 'conjunction', 'pronoun', 'interjection'].includes(cls)
-        );
-        
-        const pos = posClass || 'unknown';
-        const confidence = wordElement.getAttribute('data-confidence') || '未知';
-        
-        const tooltipContent = `
-            <div class="ela-tooltip-header">
-                <span class="ela-tooltip-word">${word}</span>
-                <span class="ela-tooltip-pos ${pos}">${this.translatePartOfSpeech(pos)}</span>
-            </div>
-            <div class="ela-tooltip-offline-notice">
-                <div style="color: #e74c3c; font-size: 12px; margin-top: 8px;">
-                    ⚠️ オフラインモード - 詳細情報は拡張機能の再読み込み後に利用可能
-                </div>
-                <div style="color: #666; font-size: 11px; margin-top: 4px;">
-                    信頼度: ${confidence}
-                </div>
-            </div>
-        `;
-        
-        this.showTooltipWithContent(wordElement, tooltipContent);
-    }
+
     
     // メモリ使用量とキャッシュ統計を取得
     getCacheStatistics() {
@@ -320,56 +324,27 @@ class EnglishLearningAssistant {
         });
     }
     
-    // Extension contextの状態をチェック
+    // Extension contextの状態をチェック（簡素化版）
     isExtensionContextValid() {
-        if (this.contextInvalidated) {
-            return false;
-        }
-        
-        // より厳密なコンテキストチェック
+        // 基本的なチェックのみ（過度な処理を避ける）
         try {
-            // chrome.runtime.idをチェック
-            if (!chrome.runtime?.id) {
-                console.warn('Extension context check failed: chrome.runtime.id is null');
-                this.contextInvalidated = true;
-                this.handleContextInvalidation();
-                return false;
-            }
-            
-            // chrome.runtime.sendMessageが存在するかチェック
-            if (typeof chrome.runtime.sendMessage !== 'function') {
-                console.warn('Extension context check failed: sendMessage is not available');
-                this.contextInvalidated = true;
-                this.handleContextInvalidation();
-                return false;
-            }
-            
-            // 実際に簡単なメッセージを送信してテスト
-            chrome.runtime.sendMessage({type: 'CONTEXT_CHECK'}, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.warn('Extension context check failed via test message:', chrome.runtime.lastError.message);
-                    if (!this.contextInvalidated) {
-                        this.contextInvalidated = true;
-                        this.handleContextInvalidation();
-                    }
-                }
-            });
-            
-            return true;
+            return !!(chrome.runtime?.id && typeof chrome.runtime.sendMessage === 'function');
         } catch (error) {
-            console.warn('Extension context check failed with exception:', error);
-            this.contextInvalidated = true;
-            this.handleContextInvalidation();
             return false;
         }
     }
     
-    // タイムアウト付きでメッセージを送信
+    // タイムアウト付きでメッセージを送信（改善版）
     async sendMessageWithTimeout(message, timeout = 10000) {
+        // 事前チェック
+        if (!this.isExtensionContextValid()) {
+            throw new Error('Extension context is not available');
+        }
+        
         return new Promise((resolve, reject) => {
             // タイムアウトタイマー
             const timeoutId = setTimeout(() => {
-                reject(new Error('Message timeout: Extension context may be invalidated'));
+                reject(new Error('Message timeout - Extension may be reloading'));
             }, timeout);
             
             try {
@@ -378,7 +353,18 @@ class EnglishLearningAssistant {
                     
                     // Chrome runtime エラーチェック
                     if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
+                        const errorMsg = chrome.runtime.lastError.message;
+                        
+                        // Extension contextエラーの特別処理
+                        if (errorMsg.includes('Extension context invalidated') || 
+                            errorMsg.includes('message port closed') ||
+                            errorMsg.includes('receiving end does not exist')) {
+                            console.warn('Extension context issue detected:', errorMsg);
+                            // コンテキスト無効化フラグを設定（ただし大げさな処理はしない）
+                            this.contextInvalidated = true;
+                        }
+                        
+                        reject(new Error(errorMsg));
                         return;
                     }
                     
@@ -482,8 +468,10 @@ class EnglishLearningAssistant {
             // バックグラウンド翻訳を開始
             this.startBackgroundTranslation();
             
-            // LLM解析を開始
-            this.startLLMAnalysis();
+            // LLM解析を開始（最適化：500msに短縮）
+            setTimeout(() => {
+                this.startLLMAnalysis();
+            }, 500);
             
             this.isActive = true;
             console.log('学習モードを開始しました');
@@ -677,11 +665,11 @@ class EnglishLearningAssistant {
             for (const word of words) {
                 const cleanWord = word.trim();
                 if (this.isEnglishWord(cleanWord)) {
-                    const pos = this.guessPartOfSpeech(cleanWord);
+                    // LLM解析待ち状態のみ（ルールベース推測は使用しない）
                     const span = document.createElement('span');
-                    span.className = `ela-word ela-${pos}`;
+                    span.className = 'ela-word ela-pending';
                     span.setAttribute('data-word', cleanWord.toLowerCase());
-                    span.setAttribute('data-pos', pos);
+                    span.setAttribute('data-pos', 'pending');
                     span.textContent = word;
                     fragment.appendChild(span);
                 } else {
@@ -697,54 +685,16 @@ class EnglishLearningAssistant {
         }
     }
     
-    guessPartOfSpeech(word) {
-        const lowerWord = word.toLowerCase();
-        
-        // 動詞の推測
-        if (lowerWord.endsWith('ing') || lowerWord.endsWith('ed') || lowerWord.endsWith('s')) {
-            return 'verb';
-        }
-        
-        // 形容詞の推測
-        if (lowerWord.endsWith('ly')) {
-            return 'adverb';
-        }
-        
-        // 前置詞
-        const prepositions = ['in', 'on', 'at', 'by', 'for', 'with', 'from', 'to', 'of', 'about', 'under', 'over'];
-        if (prepositions.includes(lowerWord)) {
-            return 'preposition';
-        }
-        
-        // 代名詞
-        const pronouns = ['i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them'];
-        if (pronouns.includes(lowerWord)) {
-            return 'pronoun';
-        }
-        
-        // 接続詞
-        const conjunctions = ['and', 'or', 'but', 'so', 'because', 'although', 'while'];
-        if (conjunctions.includes(lowerWord)) {
-            return 'conjunction';
-        }
-        
-        // 限定詞
-        const determiners = ['the', 'a', 'an', 'this', 'that', 'these', 'those', 'my', 'your', 'his', 'her', 'its', 'our', 'their'];
-        if (determiners.includes(lowerWord)) {
-            return 'determiner';
-        }
-        
-        // デフォルトは名詞
-        return 'noun';
-    }
+    // ルールベース品詞推測は無効化（LLM解析のみ使用）
     
     isEnglishWord(word) {
         const cleanWord = word.trim().toLowerCase();
         return /^[a-z]+$/.test(cleanWord) && cleanWord.length > 1;
     }
     
-    wrapWord(word, pos) {
-        return `<span class="ela-word ela-${pos}" data-word="${word.toLowerCase()}" data-pos="${pos}">${word}</span>`;
+    wrapWord(word) {
+        // LLM解析待ち状態のみ（ルールベース推測は使用しない）
+        return `<span class="ela-word ela-pending" data-word="${word.toLowerCase()}" data-pos="pending">${word}</span>`;
     }
     
     addWordEventListeners(element) {
@@ -759,12 +709,29 @@ class EnglishLearningAssistant {
                         clearTimeout(this.hideTooltipTimer);
                         this.hideTooltipTimer = null;
                     }
-                    this.showDictionary(e.target);
+                    
+                    // 既存の遅延タイマーもクリア
+                    if (this.showDelayTimer) {
+                        clearTimeout(this.showDelayTimer);
+                        this.showDelayTimer = null;
+                    }
+                    
+                    // 少し遅延させてツールチップを表示（誤動作防止）
+                    this.showDelayTimer = setTimeout(() => {
+                        this.showDictionary(e.target);
+                    }, 100);
                 }
             });
             
             // マウスアウトイベント - 遅延付き
-            word.addEventListener('mouseleave', () => {
+            word.addEventListener('mouseleave', (e) => {
+                // 遅延表示をキャンセル
+                if (this.showDelayTimer) {
+                    clearTimeout(this.showDelayTimer);
+                    this.showDelayTimer = null;
+                }
+                
+                // ツールチップへ移動する可能性を考慮して遅延
                 this.delayedHideDictionary();
             });
         });
@@ -786,10 +753,10 @@ class EnglishLearningAssistant {
     }
     
     delayedHideDictionary() {
-        // 300ms後に辞書を隠す（ユーザーがツールチップに移動する時間を与える）
+        // 500ms後に辞書を隠す（ユーザーがツールチップに移動する時間を与える）
         this.hideTooltipTimer = setTimeout(() => {
             this.hideDictionary();
-        }, 300);
+        }, 500);
     }
     
     async showTooltip(wordElement, word) {
@@ -891,7 +858,7 @@ class EnglishLearningAssistant {
             
             // Extension context チェック
             if (!this.isExtensionContextValid()) {
-                console.warn('Extension context invalidated, skipping API call');
+                // 静かに失敗（ログを減らす）
                 return null;
             }
             
@@ -1197,7 +1164,7 @@ class EnglishLearningAssistant {
             response = await this.sendMessageWithTimeout({
                 type: 'TRANSLATE_TEXT',
                 text: textToTranslate
-            }, 5000); // 短縮: 5秒
+            }, 20000); // 延長: 20秒
         } catch (sendError) {
             console.error('Failed to send translation request:', sendError);
             if (sendError instanceof DOMException) {
@@ -1313,8 +1280,8 @@ class EnglishLearningAssistant {
             
             const promises = batch.map(async (paragraph) => {
                 try {
-                    // 遅延を入れてAPI制限を回避
-                    await this.delay(i * 100);
+                    // 遅延を入れてAPI制限を回避（最適化：50msに短縮）
+                    await this.delay(i * 50);
                     
                     // Extension context チェック
                     if (!this.isExtensionContextValid()) {
@@ -1326,7 +1293,7 @@ class EnglishLearningAssistant {
                         response = await this.sendMessageWithTimeout({
                             type: 'TRANSLATE_TEXT',
                             text: paragraph.text
-                        }, 5000); // 短縮: 5秒
+                        }, 20000); // 延長: 20秒
                     } catch (sendError) {
                         console.error(`Failed to send translation request for paragraph ${paragraph.id}:`, sendError);
                         if (sendError instanceof DOMException) {
@@ -1426,7 +1393,7 @@ class EnglishLearningAssistant {
         console.log('Background translation complete message received, but using individual paragraph translation');
     }
     
-    // LLM解析を開始
+    // LLM解析を開始（文章単位処理）
     async startLLMAnalysis() {
         try {
             if (!this.settings.posTagging) {
@@ -1436,40 +1403,25 @@ class EnglishLearningAssistant {
             
             this.analysisInProgress = true;
             
-            // 解析対象の文章を抽出
-            const sentences = this.extractSentencesForAnalysis();
+            // 解析対象の段落を抽出（翻訳と同じ方式）
+            const paragraphs = this.extractParagraphsForAnalysis();
             
-            if (sentences.length === 0) {
-                console.log('No sentences found for LLM analysis');
+            if (paragraphs.length === 0) {
+                console.log('No paragraphs found for LLM analysis');
                 this.analysisInProgress = false;
                 return;
             }
             
-            console.log(`Starting LLM analysis for ${sentences.length} sentences`);
+            console.log(`Starting sentence-by-sentence LLM analysis for ${paragraphs.length} paragraphs`);
             
             // Extension context チェック
             if (!this.isExtensionContextValid()) {
-                throw new Error('Extension context invalidated');
+                this.analysisInProgress = false;
+                return;
             }
             
-            // バックグラウンドでLLM解析を開始
-            try {
-                await this.sendMessageWithTimeout({
-                    type: 'ANALYZE_TEXT_WITH_LLM',
-                    pageId: this.pageId,
-                    sentences: sentences
-                }, 3000); // 短縮: 3秒
-            } catch (sendError) {
-                console.error('Failed to start LLM analysis:', sendError);
-                if (sendError instanceof DOMException) {
-                    console.error('DOMException in startLLMAnalysis:', {
-                        code: sendError.code,
-                        name: sendError.name,
-                        message: sendError.message
-                    });
-                }
-                throw sendError;
-            }
+            // 段落ごとに順次処理（翻訳と同じパターン）
+            await this.analyzeParagraphsIndividually(paragraphs);
             
         } catch (error) {
             console.error('Failed to start LLM analysis:', error);
@@ -1477,65 +1429,357 @@ class EnglishLearningAssistant {
         }
     }
     
-    // LLM解析完了の処理
-    handleLLMAnalysisComplete(pageId, analysis) {
-        if (pageId !== this.pageId) {
-            console.log('LLM analysis for different page, ignoring');
-            return;
+    // 段落ごとの個別LLM解析処理
+    async analyzeParagraphsIndividually(paragraphs) {
+        console.log(`Processing ${paragraphs.length} paragraphs for LLM analysis`);
+        
+        let failedBatches = 0; // 連続失敗カウンター
+        let successCount = 0; // 成功カウンター
+        
+        // Service Worker Keep-Alive機能
+        const keepAliveInterval = setInterval(async () => {
+            try {
+                await this.sendMessageWithTimeout({
+                    type: 'CONTEXT_CHECK'
+                }, 500);
+            } catch (error) {
+                // Keep-aliveエラーは静かに処理
+            }
+        }, 500); // 最適化：500msに短縮してより積極的に監視
+        
+        // ストリーミング並列処理：15個並列に増加、1個終わったら次を追加
+        const maxConcurrency = 15;
+        let currentIndex = 0;
+        const runningPromises = new Map();
+        
+        console.log(`Starting streaming parallel processing with ${maxConcurrency} concurrent requests`);
+        
+        // 初期10個の処理を開始
+        for (let i = 0; i < Math.min(maxConcurrency, paragraphs.length); i++) {
+            this.startParagraphAnalysis(paragraphs[currentIndex], currentIndex, runningPromises);
+            currentIndex++;
         }
         
-        console.log('LLM analysis complete, updating word data');
+        // 1個完了したら次を開始するループ
+        while (runningPromises.size > 0 && currentIndex <= paragraphs.length) {
+            try {
+                // 最初に完了したPromiseを待機
+                const completedKey = await Promise.race(
+                    Array.from(runningPromises.keys()).map(async (key) => {
+                        await runningPromises.get(key);
+                        return key;
+                    })
+                );
+                
+                // 完了したPromiseの結果を処理
+                const result = await runningPromises.get(completedKey);
+                runningPromises.delete(completedKey);
+                
+                if (result.success) {
+                    successCount++;
+                    console.log(`✅ LLM analysis completed for paragraph ${result.paragraph.id} (${successCount}/${paragraphs.length})`);
+                    this.updateParagraphWords(result.paragraph, result.analysis);
+                    failedBatches = 0; // 成功時はリセット
+                } else {
+                    console.error(`❌ Failed LLM analysis for paragraph ${result.paragraph.id}: ${result.error}`);
+                    
+                    // Service Workerエラーの場合のみ失敗カウントを増加
+                    if (result.error === 'Service Worker error' && result.retryable) {
+                        failedBatches++;
+                        console.warn(`Service Worker error count: ${failedBatches}/20`);
+                    } else {
+                        console.log(`Non-retryable error, not incrementing failure count`);
+                    }
+                }
+                
+                // 次の段落があれば新しい処理を開始
+                if (currentIndex < paragraphs.length) {
+                    this.startParagraphAnalysis(paragraphs[currentIndex], currentIndex, runningPromises);
+                    currentIndex++;
+                }
+                
+                // 連続失敗チェックと復旧処理（並列度15に合わせて調整）
+                if (failedBatches >= 20) {
+                    console.error('🛑 Too many consecutive failures, stopping LLM analysis');
+                    console.log(`✅ Successfully processed ${successCount} paragraphs before stopping`);
+                    this.analysisInProgress = false;
+                    break;
+                } else if (failedBatches >= 5 && failedBatches % 5 === 0) {
+                    // 5回失敗するごとに短い復旧遅延（最適化：1秒に短縮）
+                    console.warn(`🔄 Service Worker recovery delay after ${failedBatches} failures`);
+                    await this.delay(1000); // 1秒の復旧遅延
+                }
+                
+            } catch (error) {
+                console.error('Error in streaming processing:', error);
+                // エラー時も次に進む
+                if (currentIndex < paragraphs.length) {
+                    this.startParagraphAnalysis(paragraphs[currentIndex], currentIndex, runningPromises);
+                    currentIndex++;
+                }
+            }
+        }
         
-        // 解析結果を保存
-        if (analysis && analysis.words) {
-            analysis.words.forEach(wordData => {
-                this.llmAnalysisResults.set(wordData.word.toLowerCase(), wordData);
+        // 残りの処理を完了まで待機
+        if (runningPromises.size > 0) {
+            console.log(`Waiting for ${runningPromises.size} remaining processes to complete...`);
+            const remainingResults = await Promise.allSettled(Array.from(runningPromises.values()));
+            
+            remainingResults.forEach((result) => {
+                if (result.status === 'fulfilled' && result.value.success) {
+                    successCount++;
+                    console.log(`✅ LLM analysis completed for paragraph ${result.value.paragraph.id} (${successCount}/${paragraphs.length})`);
+                    this.updateParagraphWords(result.value.paragraph, result.value.analysis);
+                }
             });
         }
         
-        // 句動詞・イディオムも保存
+        // Keep-Aliveを停止
+        clearInterval(keepAliveInterval);
+        
+        console.log(`📊 LLM analysis completed: ${successCount}/${paragraphs.length} paragraphs processed successfully`);
+        
+        // 段落処理が失敗した場合のフォールバック処理
+        if (successCount === 0 && paragraphs.length > 0) {
+            console.log('🔄 Paragraph analysis failed, enabling enhanced on-demand analysis');
+            this.enableEnhancedOnDemandAnalysis();
+        }
+        
+        this.analysisInProgress = false;
+    }
+    
+    // 個別段落分析を開始（ストリーミング処理用）
+    startParagraphAnalysis(paragraph, index, runningPromises) {
+        const key = `paragraph-${index}`;
+        
+        const promise = (async () => {
+            try {
+                // 小さな遅延でスタート時間をずらす（最適化：50msに短縮）
+                await this.delay(index % 15 * 30); // 0-0.42秒の範囲でずらす（15並列対応）
+                
+                // Extension context チェック
+                if (!this.isExtensionContextValid()) {
+                    console.warn(`Extension context invalid, skipping paragraph ${paragraph.id}`);
+                    return { success: false, paragraph, error: 'Extension context invalid' };
+                }
+                
+                console.log(`🚀 Starting analysis for paragraph ${paragraph.id}: "${paragraph.text.substring(0, 50)}..."`);
+                
+                const response = await this.sendMessageWithTimeout({
+                    type: 'ANALYZE_TEXT_WITH_LLM',
+                    pageId: this.pageId,
+                    sentences: [paragraph.text],
+                    paragraphId: paragraph.id
+                }, 60000); // タイムアウトを60秒に大幅延長
+                
+                if (response && response.success && response.analysis) {
+                    return { 
+                        success: true, 
+                        paragraph, 
+                        analysis: response.analysis 
+                    };
+                } else {
+                    const errorMsg = response?.error || 'Unknown error';
+                    return { 
+                        success: false, 
+                        paragraph, 
+                        error: errorMsg 
+                    };
+                }
+                
+                            } catch (error) {
+                    // Extension context系のエラーを細分化
+                    const errorMessage = error.message || '';
+                    if (errorMessage.includes('Receiving end does not exist') || 
+                        errorMessage.includes('Message timeout') ||
+                        errorMessage.includes('message channel closed') ||
+                        errorMessage.includes('Extension context invalidated')) {
+                        console.warn(`Service Worker error for paragraph ${paragraph.id}: ${errorMessage}`);
+                        return { 
+                            success: false, 
+                            paragraph, 
+                            error: 'Service Worker error',
+                            retryable: true // 再試行可能なエラー
+                        };
+                    } else {
+                        console.error(`Unexpected error for paragraph ${paragraph.id}:`, error);
+                        return { 
+                            success: false, 
+                            paragraph, 
+                            error: error.message,
+                            retryable: false // 再試行不可能なエラー
+                        };
+                    }
+                }
+        })();
+        
+        runningPromises.set(key, promise);
+        return promise;
+    }
+    
+    // 拡張オンデマンド分析モードを有効化
+    enableEnhancedOnDemandAnalysis() {
+        console.log('🚀 Enhanced on-demand analysis mode enabled');
+        this.enhancedOnDemandMode = true;
+        
+        // 全ての pending 単語を対象に視覚的ヒントを追加
+        const pendingWords = document.querySelectorAll('.ela-word[data-pos="pending"]');
+        console.log(`Found ${pendingWords.length} pending words for on-demand analysis`);
+        
+        pendingWords.forEach(element => {
+            // オンデマンド分析対象であることを示すスタイル追加
+            element.style.animation = 'pulse 2s infinite';
+            element.title = 'マウスオーバーでAI分析を実行';
+        });
+        
+        // CSS アニメーションを動的に追加
+        if (!document.querySelector('#ela-ondemand-styles')) {
+            const style = document.createElement('style');
+            style.id = 'ela-ondemand-styles';
+            style.textContent = `
+                @keyframes pulse {
+                    0% { opacity: 0.7; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.7; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+    
+    // LLM解析用の段落抽出（翻訳と同じ方式）
+    extractParagraphsForAnalysis() {
+        const paragraphs = [];
+        const paragraphElements = document.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6');
+        const processedTexts = new Set(); // 重複テキストを除去
+        
+        paragraphElements.forEach((element, index) => {
+            // この段落内にela-wordが含まれているかチェック
+            const wordsInParagraph = element.querySelectorAll('.ela-word[data-pos="pending"]');
+            
+            if (wordsInParagraph.length > 0) {
+                const text = this.extractCleanText(element);
+                
+                // 重複チェック
+                if (processedTexts.has(text)) {
+                    console.log(`Skipping paragraph ${index}: duplicate text`);
+                    return;
+                }
+                
+                if (text.length > 20 && this.isEnglishText(text) && wordsInParagraph.length >= 2) {
+                    processedTexts.add(text); // 重複防止に追加
+                    paragraphs.push({
+                        id: `paragraph-${index}`,
+                        text: text,
+                        element: element,
+                        wordCount: wordsInParagraph.length
+                    });
+                } else {
+                    console.log(`Skipping paragraph ${index}: too short (${text.length} chars) or insufficient words (${wordsInParagraph.length})`);
+                }
+            }
+        });
+        
+        console.log(`Found ${paragraphs.length} paragraphs containing pending words`);
+        
+        // 最大パフォーマンス設定（最大5000段落）
+        const maxParagraphs = 5000;
+        if (paragraphs.length > maxParagraphs) {
+            console.log(`Limiting processing to first ${maxParagraphs} paragraphs for maximum performance`);
+            return paragraphs.slice(0, maxParagraphs);
+        }
+        
+        return paragraphs;
+    }
+    
+    // 段落内の単語のみを効率的に更新
+    updateParagraphWords(paragraph, analysisData) {
+        console.log(`Updating words in paragraph ${paragraph.id}`);
+        
+        if (!analysisData || !analysisData.words) {
+            console.log('No word analysis data received');
+            return;
+        }
+        
+        // 解析データをマップに変換（データ検証付き）
+        const analysisMap = new Map();
+        let validWords = 0;
+        let invalidWords = 0;
+        
+        analysisData.words.forEach((wordData, index) => {
+            // データ検証
+            if (!wordData || typeof wordData !== 'object') {
+                console.warn(`Invalid word data at index ${index}:`, wordData);
+                invalidWords++;
+                return;
+            }
+            
+            if (!wordData.word || typeof wordData.word !== 'string') {
+                console.warn(`Missing or invalid 'word' field at index ${index}:`, wordData);
+                invalidWords++;
+                return;
+            }
+            
+            if (!wordData.pos || typeof wordData.pos !== 'string') {
+                console.warn(`Missing or invalid 'pos' field for word '${wordData.word}':`, wordData);
+                invalidWords++;
+                return;
+            }
+            
+            try {
+                analysisMap.set(wordData.word.toLowerCase(), wordData);
+                validWords++;
+            } catch (error) {
+                console.warn(`Error processing word at index ${index}:`, error, wordData);
+                invalidWords++;
+            }
+        });
+        
+        console.log(`Word data validation: ${validWords} valid, ${invalidWords} invalid`);
+        
+        // この段落内のpending単語のみを対象にする（全ページ検索なし）
+        const wordsInParagraph = paragraph.element.querySelectorAll('.ela-word[data-pos="pending"]');
+        
+        wordsInParagraph.forEach(element => {
+            const word = element.dataset.word;
+            if (word && analysisMap.has(word.toLowerCase())) {
+                const wordAnalysisData = analysisMap.get(word.toLowerCase());
+                
+                // 段落内の単語を更新
+                if (wordAnalysisData.pos) {
+                    element.className = 'ela-word ela-' + wordAnalysisData.pos;
+                    element.dataset.pos = wordAnalysisData.pos;
+                    element.dataset.source = 'llm';
+                    
+                    // キャッシュにも保存
+                    this.llmAnalysisResults.set(word.toLowerCase(), wordAnalysisData);
+                    
+                    console.log(`Updated word "${word}": pending → ${wordAnalysisData.pos} (in paragraph ${paragraph.id})`);
+                }
+                
+                if (wordAnalysisData.confidence) {
+                    element.dataset.confidence = wordAnalysisData.confidence;
+                }
+            }
+        });
+        
+        console.log(`Updated ${wordsInParagraph.length} words in paragraph ${paragraph.id}`);
+    }
+    
+    // LLM解析完了の処理（旧システム、現在は段落ベース処理使用）
+    handleLLMAnalysisComplete(pageId, analysis) {
+        console.log('Legacy LLM analysis complete handler - now using paragraph-based processing');
+        
+        // 句動詞・イディオムのキャッシュのみ処理（下位互換性）
         if (analysis && analysis.phrases) {
             analysis.phrases.forEach(phraseData => {
                 this.llmAnalysisResults.set(phraseData.phrase.toLowerCase(), phraseData);
             });
         }
-        
-        this.analysisInProgress = false;
-        
-        // 既存の単語要素の品詞クラスを更新
-        this.updateWordElementsWithLLMData();
-        
-        console.log(`LLM analysis stored for ${this.llmAnalysisResults.size} words/phrases`);
     }
     
-    // LLM解析用の文章抽出
-    extractSentencesForAnalysis() {
-        const sentences = [];
-        
-        // 既に処理されている要素から文章を抽出
-        const processedElements = document.querySelectorAll('.ela-word');
-        const sentenceElements = new Set();
-        
-        processedElements.forEach(wordElement => {
-            let currentElement = wordElement.parentElement;
-            while (currentElement) {
-                if (['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'SPAN'].includes(currentElement.tagName)) {
-                    sentenceElements.add(currentElement);
-                    break;
-                }
-                currentElement = currentElement.parentElement;
-            }
-        });
-        
-        sentenceElements.forEach(element => {
-            const text = this.extractCleanText(element);
-            if (text.length > 20 && this.isEnglishText(text)) {
-                sentences.push(text);
-            }
-        });
-        
-        return sentences.slice(0, 10); // 最大10文章まで
-    }
+
+
     
     // LLM単語解析の取得
     async getLLMWordAnalysis(word, wordElement) {
@@ -1556,15 +1800,19 @@ class EnglishLearningAssistant {
             
             // バックグラウンド解析が進行中の場合は少し待つ
             if (this.analysisInProgress) {
-                await this.delay(500);
+                console.log(`Background analysis in progress, waiting for word: ${word}`);
+                await this.delay(200); // 最適化：200msに短縮
                 if (this.llmAnalysisResults.has(lowerWord)) {
+                    console.log(`Found LLM result after waiting for word: ${word}`);
                     return this.llmAnalysisResults.get(lowerWord);
                 }
             }
             
+
+            
             // Extension context チェック
             if (!this.isExtensionContextValid()) {
-                console.warn('Extension context invalidated, skipping LLM analysis');
+                // 静かに失敗（ログを減らす）
                 return null;
             }
             
@@ -1579,11 +1827,20 @@ class EnglishLearningAssistant {
                         type: 'GET_WORD_ANALYSIS',
                         word: word,
                         sentence: sentence
-                    }, 8000); // 短縮: 8秒
+                    }, 25000); // 延長: 25秒
                     
                     if (response && response.success && response.analysis) {
                         // 個別解析結果をキャッシュに保存
                         this.llmAnalysisResults.set(lowerWord, response.analysis);
+                        
+                        // この単語の要素のみを更新（マウスオーバー対象）
+                        if (wordElement && response.analysis.pos) {
+                            wordElement.className = 'ela-word ela-' + response.analysis.pos;
+                            wordElement.dataset.pos = response.analysis.pos;
+                            wordElement.dataset.source = 'llm-individual';
+                            
+                            console.log(`Individual LLM updated word "${word}": pending → ${response.analysis.pos}`);
+                        }
                         
                         // キャッシュサイズ制限
                         if (this.llmAnalysisResults.size > this.MAX_LLM_CACHE) {
@@ -1754,22 +2011,24 @@ class EnglishLearningAssistant {
         return posMap[pos.toLowerCase()] || 'noun';
     }
     
-    // 既存の単語要素をLLMデータで更新
+    // 既存の単語要素をLLMデータで更新（シンプル版）
     updateWordElementsWithLLMData() {
-        const wordElements = document.querySelectorAll('.ela-word');
+        const wordElements = document.querySelectorAll('.ela-word[data-pos="pending"]');
+        console.log(`Updating ${wordElements.length} pending word elements with LLM data`);
         
         wordElements.forEach(element => {
             const word = element.dataset.word;
-            if (word && this.llmAnalysisResults.has(word)) {
-                const analysisData = this.llmAnalysisResults.get(word);
+            if (word && this.llmAnalysisResults.has(word.toLowerCase())) {
+                const analysisData = this.llmAnalysisResults.get(word.toLowerCase());
                 
-                // 品詞クラスを更新
+                // LLM解析結果で品詞を更新（pending → 実際の品詞）
                 if (analysisData.pos) {
-                    // 既存の品詞クラスを削除
-                    element.className = element.className.replace(/ela-\w+/g, 'ela-word');
-                    // 新しい品詞クラスを追加
-                    element.classList.add(`ela-${analysisData.pos}`);
+                    // クラスを更新
+                    element.className = 'ela-word ela-' + analysisData.pos;
                     element.dataset.pos = analysisData.pos;
+                    element.dataset.source = 'llm';
+                    
+                    console.log(`LLM updated word "${word}": pending → ${analysisData.pos} (confidence: ${analysisData.confidence})`);
                 }
                 
                 // 信頼度を属性として保存
@@ -1779,8 +2038,42 @@ class EnglishLearningAssistant {
             }
         });
     }
+    
+
+    
+
 }
 
 // コンテンツスクリプトを初期化
-const englishLearningAssistant = new EnglishLearningAssistant();
+console.log('🔧 Initializing English Learning Assistant...');
+
+try {
+    const englishLearningAssistant = new EnglishLearningAssistant();
+    console.log('✅ English Learning Assistant instance created');
+    
+    // グローバルアクセス用
+    window.englishLearningAssistant = englishLearningAssistant;
+    
+    // 基本的な動作確認
+    if (typeof englishLearningAssistant.init === 'function') {
+        console.log('🔄 Starting initialization process...');
+        // init()は既にコンストラクタで呼ばれているので、ここでは状態確認のみ
+    }
+    
+    // デバッグ用の即座確認
+    setTimeout(() => {
+        console.log('📊 Post-initialization check:');
+        console.log(`- ELA_DEBUG available: ${typeof window.ELA_DEBUG !== 'undefined'}`);
+        console.log(`- checkELA available: ${typeof window.checkELA !== 'undefined'}`);
+        console.log(`- Extension loaded: ${window.ELA_EXTENSION_LOADED || false}`);
+    }, 1000);
+    
+} catch (error) {
+    console.error('❌ Failed to initialize English Learning Assistant:', error);
+    console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+    });
+}
 
