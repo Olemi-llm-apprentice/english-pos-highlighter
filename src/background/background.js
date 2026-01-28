@@ -5,7 +5,118 @@ class BackgroundService {
         this.processingQueue = new Map();  // 処理中キュー
         this.analysisCache = new Map();    // LLM解析結果キャッシュ
         this.analysisQueue = new Map();    // LLM解析処理キュー
+        this.logBuffer = [];               // ログバッファ
+        this.maxLogEntries = 1000;         // 最大ログ保持数
+        
+        this.initLogging();
         this.init();
+    }
+    
+    // ログシステムの初期化
+    initLogging() {
+        // console.logをラップしてログバッファに保存
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        console.log = (...args) => {
+            this.addToLogBuffer('LOG', args);
+            originalConsoleLog.apply(console, args);
+        };
+        
+        console.error = (...args) => {
+            this.addToLogBuffer('ERROR', args);
+            originalConsoleError.apply(console, args);
+        };
+        
+        console.warn = (...args) => {
+            this.addToLogBuffer('WARN', args);
+            originalConsoleWarn.apply(console, args);
+        };
+        
+        console.log('Background service logging initialized');
+    }
+    
+    // ログバッファに追加
+    addToLogBuffer(level, args) {
+        const timestamp = new Date().toISOString();
+        const message = args.map(arg => 
+            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+        ).join(' ');
+        
+        this.logBuffer.push({
+            timestamp,
+            level,
+            message,
+            source: 'background'
+        });
+        
+        // バッファサイズ制限
+        if (this.logBuffer.length > this.maxLogEntries) {
+            this.logBuffer.shift(); // 古いログを削除
+        }
+    }
+    
+    // ログ取得（フィルタ対応）
+    getLogs(filter = {}, limit = 100) {
+        let filteredLogs = this.logBuffer;
+        
+        // レベルフィルタ
+        if (filter.level) {
+            filteredLogs = filteredLogs.filter(log => log.level === filter.level);
+        }
+        
+        // 時間フィルタ（最近N分）
+        if (filter.minutes) {
+            const cutoffTime = new Date(Date.now() - filter.minutes * 60 * 1000);
+            filteredLogs = filteredLogs.filter(log => new Date(log.timestamp) > cutoffTime);
+        }
+        
+        // メッセージ検索
+        if (filter.search) {
+            const searchTerm = filter.search.toLowerCase();
+            filteredLogs = filteredLogs.filter(log => 
+                log.message.toLowerCase().includes(searchTerm)
+            );
+        }
+        
+        // 制限数適用
+        return filteredLogs.slice(-limit);
+    }
+    
+    // ログをファイルとしてエクスポート
+    async exportLogs() {
+        try {
+            const logs = this.logBuffer;
+            const logText = logs.map(log => 
+                `[${log.timestamp}] ${log.level}: ${log.message}`
+            ).join('\n');
+            
+            // Blob作成
+            const blob = new Blob([logText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            // ダウンロード用のデータを返す
+            return {
+                success: true,
+                downloadUrl: url,
+                filename: `extension-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`,
+                logCount: logs.length
+            };
+            
+        } catch (error) {
+            console.error('Log export error:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+    
+    // ログクリア
+    clearLogs() {
+        this.logBuffer = [];
+        console.log('Log buffer cleared');
     }
     
     init() {
@@ -71,8 +182,15 @@ class BackgroundService {
                     break;
                     
                 case 'ANALYZE_TEXT_WITH_LLM':
-                    this.analyzeTextWithLLM(message.pageId, message.sentences);
-                    sendResponse({ success: true, message: 'LLM analysis started' });
+                    if (message.paragraphId) {
+                        // 新しい段落ベース処理
+                        const result = await this.analyzeParagraphWithLLM(message.pageId, message.sentences, message.paragraphId);
+                        sendResponse(result);
+                    } else {
+                        // 旧システム（下位互換性）
+                        this.analyzeTextWithLLM(message.pageId, message.sentences);
+                        sendResponse({ success: true, message: 'LLM analysis started' });
+                    }
                     break;
                     
                 case 'GET_WORD_ANALYSIS':
@@ -83,6 +201,24 @@ class BackgroundService {
                 case 'CONTEXT_CHECK':
                     // Extension context有効性確認用の軽量メッセージ
                     sendResponse({ success: true, timestamp: Date.now() });
+                    break;
+                    
+                case 'GET_LOGS':
+                    // ログ取得
+                    const logs = this.getLogs(message.filter, message.limit);
+                    sendResponse({ success: true, logs: logs });
+                    break;
+                    
+                case 'EXPORT_LOGS':
+                    // ログエクスポート
+                    const exportResult = await this.exportLogs();
+                    sendResponse(exportResult);
+                    break;
+                    
+                case 'CLEAR_LOGS':
+                    // ログクリア
+                    this.clearLogs();
+                    sendResponse({ success: true, message: 'Logs cleared' });
                     break;
                     
                 default:
@@ -507,6 +643,67 @@ class BackgroundService {
         }
     }
     
+    // 段落ベースのLLM解析（新システム）
+    async analyzeParagraphWithLLM(pageId, sentences, paragraphId) {
+        try {
+            console.log(`Starting paragraph-based LLM analysis for paragraph: ${paragraphId}`);
+            
+            if (!sentences || sentences.length === 0) {
+                return { success: false, error: 'No sentences provided for analysis' };
+            }
+            
+            // 段落のテキストを結合
+            const paragraphText = sentences.join(' ');
+            
+            if (paragraphText.length < 10) {
+                return { success: false, error: 'Paragraph text too short for analysis' };
+            }
+            
+            // キャッシュ確認（段落単位）
+            const cacheKey = this.generateAnalysisCacheKey(paragraphText);
+            if (this.analysisCache.has(cacheKey)) {
+                console.log(`Paragraph analysis found in cache: ${paragraphId}`);
+                const cached = this.analysisCache.get(cacheKey);
+                return { success: true, analysis: cached.analysis, paragraphId: paragraphId };
+            }
+            
+            // LLM解析実行
+            console.log(`Analyzing paragraph ${paragraphId} with ${paragraphText.length} characters`);
+            const analysisResult = await this.performLLMAnalysis(paragraphText);
+            
+            if (analysisResult.success) {
+                // キャッシュに保存
+                this.analysisCache.set(cacheKey, {
+                    analysis: analysisResult.analysis,
+                    timestamp: Date.now(),
+                    paragraphId: paragraphId
+                });
+                
+                console.log(`Paragraph LLM analysis completed: ${paragraphId}`);
+                return { 
+                    success: true, 
+                    analysis: analysisResult.analysis, 
+                    paragraphId: paragraphId 
+                };
+            } else {
+                console.error(`LLM analysis failed for paragraph ${paragraphId}:`, analysisResult.error);
+                return { 
+                    success: false, 
+                    error: analysisResult.error || 'LLM analysis failed',
+                    paragraphId: paragraphId 
+                };
+            }
+            
+        } catch (error) {
+            console.error(`Paragraph LLM analysis error for ${paragraphId}:`, error);
+            return { 
+                success: false, 
+                error: error.message || 'Unknown error during paragraph analysis',
+                paragraphId: paragraphId 
+            };
+        }
+    }
+    
     // LLM解析の実行
     async performLLMAnalysis(text) {
         return await this.performLLMAnalysisWithRetry(text, 3);
@@ -535,7 +732,11 @@ class BackgroundService {
                     messages: [
                         {
                             role: 'system',
-                            content: `あなたは英語学習支援の専門家です。与えられた英文を解析し、必ずJSON形式で応答してください。以下の形式でJSONを出力してください：
+                            content: `あなたは英語学習支援の専門家です。与えられた英文を解析し、必ずJSON形式で応答してください。
+
+**重要：与えられた英文に含まれる全ての単語（冠詞、前置詞、代名詞なども含む）を漏れなく解析してください。句読点は除外し、contractions（can't, you're等）は1つの単語として扱ってください。**
+
+以下の形式でJSONを出力してください：
 
 {
   "words": [
@@ -582,7 +783,109 @@ class BackgroundService {
 - 判定の信頼度（0-1）
 - 文法的な関係性の解説
 
-句動詞・イディオムも検出してください。例文では対象語句を**で囲んで強調してください。`
+句動詞・イディオムも検出してください。例文では対象語句を**で囲んで強調してください。
+品詞は noun/verb/adjective/adverb/preposition/pronoun/conjunction/determiner のいずれかを使用してください。
+例文では対象単語を**で囲んで強調してください。
+結果は必ず日本語で説明すること。
+
+Few-shot example:
+入力: "The cat can't run fast."
+完全解析結果:
+{
+  "words": [
+    {
+      "word": "The",
+      "pos": "determiner",
+      "basic_meaning": "定冠詞：特定のものを示す限定詞",
+      "contextual_meaning": "特定の猫を指している",
+      "examples": [
+        {
+          "english": "**The** book is on the table.",
+          "japanese": "**その**本はテーブルの上にある。"
+        },
+        {
+          "english": "I saw **the** movie yesterday.",
+          "japanese": "私は昨日**その**映画を見た。"
+        }
+      ],
+      "confidence": 1.00,
+      "context_notes": "名詞'cat'を特定化している限定詞"
+    },
+    {
+      "word": "cat",
+      "pos": "noun",
+      "basic_meaning": "名詞：猫、動物の一種",
+      "contextual_meaning": "動作の主体となる動物",
+      "examples": [
+        {
+          "english": "The **cat** is sleeping.",
+          "japanese": "**猫**が眠っている。"
+        },
+        {
+          "english": "I have a **cat** at home.",
+          "japanese": "家で**猫**を飼っている。"
+        }
+      ],
+      "confidence": 1.00,
+      "context_notes": "文の主語として機能している"
+    },
+    {
+      "word": "can't",
+      "pos": "verb",
+      "basic_meaning": "助動詞canの否定形：〜できない、〜してはいけない",
+      "contextual_meaning": "猫が速く走ることができないという能力の否定",
+      "examples": [
+        {
+          "english": "I **can't** swim.",
+          "japanese": "私は泳ぐことが**できない**。"
+        },
+        {
+          "english": "You **can't** park here.",
+          "japanese": "ここに駐車**してはいけない**。"
+        }
+      ],
+      "confidence": 0.98,
+      "context_notes": "主語'cat'の能力を否定している助動詞"
+    },
+    {
+      "word": "run",
+      "pos": "verb",
+      "basic_meaning": "動詞：走る、動く、運営する, 名詞：競走、流れ",
+      "contextual_meaning": "猫が足を使って移動する動作",
+      "examples": [
+        {
+          "english": "I **run** every morning.",
+          "japanese": "私は毎朝**走る**。"
+        },
+        {
+          "english": "The water **runs** down the hill.",
+          "japanese": "水が丘を**流れ下る**。"
+        }
+      ],
+      "confidence": 0.95,
+      "context_notes": "助動詞'can't'に続く動詞の原形として使用"
+    },
+    {
+      "word": "fast",
+      "pos": "adverb",
+      "basic_meaning": "副詞：速く、素早く, 形容詞：速い, 動詞：断食する",
+      "contextual_meaning": "走る速度が速いという様子",
+      "examples": [
+        {
+          "english": "She drives **fast**.",
+          "japanese": "彼女は**速く**運転する。"
+        },
+        {
+          "english": "Time goes **fast**.",
+          "japanese": "時間が**速く**過ぎる。"
+        }
+      ],
+      "confidence": 0.92,
+      "context_notes": "動詞'run'を修飾している副詞"
+    }
+  ],
+  "phrases": []
+}`
                         },
                         {
                             role: 'user',
@@ -617,6 +920,69 @@ class BackgroundService {
                 }
                 
                 console.log(`Successfully parsed LLM analysis with ${analysis.words.length} words`);
+                
+                // JSON構造検証
+                if (!analysis.words || !Array.isArray(analysis.words)) {
+                    console.error('Invalid analysis structure: missing or invalid words array');
+                    analysis.words = [];
+                }
+                
+                // 各単語データの検証と修正
+                let validWords = 0;
+                let fixedWords = 0;
+                analysis.words = analysis.words.filter((wordData, index) => {
+                    if (!wordData || typeof wordData !== 'object') {
+                        console.warn(`Removing invalid word data at index ${index}:`, wordData);
+                        return false;
+                    }
+                    
+                    if (!wordData.word || typeof wordData.word !== 'string') {
+                        console.warn(`Removing word with invalid 'word' field at index ${index}:`, wordData);
+                        return false;
+                    }
+                    
+                    if (!wordData.pos || typeof wordData.pos !== 'string') {
+                        console.warn(`Fixing missing POS for word '${wordData.word}'`);
+                        wordData.pos = 'unknown';
+                        fixedWords++;
+                    }
+                    
+                    if (!wordData.basic_meaning) {
+                        wordData.basic_meaning = `${wordData.word}の基本的な意味`;
+                        fixedWords++;
+                    }
+                    
+                    if (!wordData.contextual_meaning) {
+                        wordData.contextual_meaning = wordData.basic_meaning;
+                        fixedWords++;
+                    }
+                    
+                    if (!wordData.examples || !Array.isArray(wordData.examples)) {
+                        wordData.examples = [];
+                        fixedWords++;
+                    }
+                    
+                    validWords++;
+                    return true;
+                });
+                
+                console.log(`JSON validation: ${validWords} valid words, ${fixedWords} fields fixed`);
+                
+                // DEBUG: プロンプト変更後の構造確認用
+                console.log('🔍 LLM Analysis Structure Debug:');
+                console.log('- Top-level keys:', Object.keys(analysis));
+                console.log('- Total words:', analysis.words.length);
+                if (analysis.words.length > 0) {
+                    const firstWord = analysis.words[0];
+                    console.log('- First word sample:', firstWord);
+                    console.log('- Required fields check:');
+                    console.log(`  - word: ${firstWord.word || 'MISSING'}`);
+                    console.log(`  - pos: ${firstWord.pos || 'MISSING'}`);
+                    console.log(`  - basic_meaning: ${firstWord.basic_meaning ? 'PRESENT' : 'MISSING'}`);
+                    console.log(`  - contextual_meaning: ${firstWord.contextual_meaning ? 'PRESENT' : 'MISSING'}`);
+                    console.log(`  - examples: ${firstWord.examples ? 'PRESENT' : 'MISSING'}`);
+                }
+                
                 return {
                     success: true,
                     analysis: analysis
@@ -626,6 +992,19 @@ class BackgroundService {
                 console.error(`Parse error on attempt ${attempt}:`, parseError);
                 console.error('Raw response length:', analysisText.length);
                 console.error('Raw response (first 500 chars):', analysisText.substring(0, 500));
+                console.error('Raw response (last 200 chars):', analysisText.substring(Math.max(0, analysisText.length - 200)));
+                
+                // プロンプト変更後の構造問題診断用
+                console.log('🚨 JSON Parse Error Analysis:');
+                console.log('- Error type:', parseError.name);
+                console.log('- Error message:', parseError.message);
+                if (parseError.message.includes('position')) {
+                    const position = parseError.message.match(/position (\d+)/);
+                    if (position) {
+                        const pos = parseInt(position[1]);
+                        console.log(`- Error around position ${pos}:`, analysisText.substring(Math.max(0, pos - 50), pos + 50));
+                    }
+                }
                 
                 if (attempt === maxRetries) {
                     // 最後の試行でも失敗した場合はフォールバック
@@ -727,7 +1106,11 @@ class BackgroundService {
                     messages: [
                         {
                             role: 'system',
-                            content: `必ずJSON形式で出力してください。次の構造にならい、各フィールドを順番通りに記載してください：
+                            content: `あなたは英語学習支援の専門家です。与えられた英文を解析し、必ずJSON形式で応答してください。
+
+**重要：与えられた英文に含まれる全ての単語（冠詞、前置詞、代名詞なども含む）を漏れなく解析してください。句読点は除外し、contractions（can't, you're等）は1つの単語として扱ってください。**
+
+以下の形式でJSONを出力してください：
 {
   "word": "単語",
   "pos": "品詞",
@@ -747,66 +1130,108 @@ class BackgroundService {
   "context_notes": "この文脈でどの単語を修飾・説明しているかの文法的解説"
 }
 
+句動詞・イディオムも検出してください。例文では対象語句を**で囲んで強調してください。
 品詞は noun/verb/adjective/adverb/preposition/pronoun/conjunction/determiner のいずれかを使用してください。
 例文では対象単語を**で囲んで強調してください。
+結果は必ず日本語で説明すること。
 
-Few-shot examples:
-例1: 単語 "run" を分析する場合（文脈: "I run every morning to stay healthy."）
+Few-shot example:
+入力: "The cat can't run fast."
+完全解析結果:
 {
-"word": "run",
-"pos": "verb",
-"basic_meaning": "動詞：走る、動く、運営する, 名詞：競走、液体が流れること",
-"contextual_meaning": "毎朝健康のために走るという行動",
-"examples": [
-{
-"english": "I run a marathon last year.",
-"japanese": "私は昨年マラソンを走った。"
-},
-{
-"english": "The company runs smoothly.",
-"japanese": "その会社はスムーズに運営されている。"
-}
-],
-"confidence": 0.98,
-"context_notes": "この文脈では主語 'I' を主動詞として修飾し、習慣的な行動を説明している。"
-}
-例2: 単語 "fast" を分析する場合（文脈: "He drives fast on the highway."）
-{
-"word": "fast",
-"pos": "adverb",
-"basic_meaning": "副詞：速く、素早く, 形容詞：速い, 動詞：断食する, 名詞：断食",
-"contextual_meaning": "高速道路で速く運転するという仕方",
-"examples": [
-{
-"english": "She runs very fast.",
-"japanese": "彼女はとても速く走る。"
-},
-{
-"english": "The train is fast.",
-"japanese": "その電車は速い。"
-}
-],
-"confidence": 0.92,
-"context_notes": "この文脈では動詞 'drives' を修飾し、運転の速度を説明している副詞。"
-}
-例3: 単語 "the" を分析する場合（文脈: "The cat is sleeping."）
-{
-"word": "the",
-"pos": "determiner",
-"basic_meaning": "限定詞：特定のものを示す定冠詞",
-"contextual_meaning": "特定の猫を指す限定詞",
-"examples": [
-{
-"english": "The book on the table is mine.",
-"japanese": "テーブルの上のその本は私のものだ。"
-},
-{
-"english": "I saw the movie yesterday.",
-"japanese": "私は昨日その映画を見た。"
-}
-],
-"confidence": 1.00,
-"context_notes": "この文脈では名詞 'cat' を修飾し、特定の猫を特定している限定詞。"
+  "words": [
+    {
+      "word": "The",
+      "pos": "determiner",
+      "basic_meaning": "定冠詞：特定のものを示す限定詞",
+      "contextual_meaning": "特定の猫を指している",
+      "examples": [
+        {
+          "english": "**The** book is on the table.",
+          "japanese": "**その**本はテーブルの上にある。"
+        },
+        {
+          "english": "I saw **the** movie yesterday.",
+          "japanese": "私は昨日**その**映画を見た。"
+        }
+      ],
+      "confidence": 1.00,
+      "context_notes": "名詞'cat'を特定化している限定詞"
+    },
+    {
+      "word": "cat",
+      "pos": "noun",
+      "basic_meaning": "名詞：猫、動物の一種",
+      "contextual_meaning": "動作の主体となる動物",
+      "examples": [
+        {
+          "english": "The **cat** is sleeping.",
+          "japanese": "**猫**が眠っている。"
+        },
+        {
+          "english": "I have a **cat** at home.",
+          "japanese": "家で**猫**を飼っている。"
+        }
+      ],
+      "confidence": 1.00,
+      "context_notes": "文の主語として機能している"
+    },
+    {
+      "word": "can't",
+      "pos": "verb",
+      "basic_meaning": "助動詞canの否定形：〜できない、〜してはいけない",
+      "contextual_meaning": "猫が速く走ることができないという能力の否定",
+      "examples": [
+        {
+          "english": "I **can't** swim.",
+          "japanese": "私は泳ぐことが**できない**。"
+        },
+        {
+          "english": "You **can't** park here.",
+          "japanese": "ここに駐車**してはいけない**。"
+        }
+      ],
+      "confidence": 0.98,
+      "context_notes": "主語'cat'の能力を否定している助動詞"
+    },
+    {
+      "word": "run",
+      "pos": "verb",
+      "basic_meaning": "動詞：走る、動く、運営する, 名詞：競走、流れ",
+      "contextual_meaning": "猫が足を使って移動する動作",
+      "examples": [
+        {
+          "english": "I **run** every morning.",
+          "japanese": "私は毎朝**走る**。"
+        },
+        {
+          "english": "The water **runs** down the hill.",
+          "japanese": "水が丘を**流れ下る**。"
+        }
+      ],
+      "confidence": 0.95,
+      "context_notes": "助動詞'can't'に続く動詞の原形として使用"
+    },
+    {
+      "word": "fast",
+      "pos": "adverb",
+      "basic_meaning": "副詞：速く、素早く, 形容詞：速い, 動詞：断食する",
+      "contextual_meaning": "走る速度が速いという様子",
+      "examples": [
+        {
+          "english": "She drives **fast**.",
+          "japanese": "彼女は**速く**運転する。"
+        },
+        {
+          "english": "Time goes **fast**.",
+          "japanese": "時間が**速く**過ぎる。"
+        }
+      ],
+      "confidence": 0.92,
+      "context_notes": "動詞'run'を修飾している副詞"
+    }
+  ],
+  "phrases": []
 }`
                         },
                         {

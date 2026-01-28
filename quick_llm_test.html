@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Quick LLM API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
+        .test-box { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .result { background: #e8f5e8; padding: 15px; border-radius: 6px; margin: 10px 0; }
+        .error { background: #ffe8e8; padding: 15px; border-radius: 6px; margin: 10px 0; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+        pre { background: #f1f1f1; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 12px; }
+        .pos-analysis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 15px 0; }
+        .pos-item { background: white; padding: 10px; border-left: 4px solid #007bff; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Quick LLM API Test</h1>
+    <p>拡張機能が有効なページでこのテストを実行してください。</p>
+    
+    <div class="test-box">
+        <h3>テスト文章:</h3>
+        <input type="text" id="testSentence" value="I can't believe you're giving up on your dreams." style="width: 100%; padding: 10px; margin: 10px 0;">
+        <button onclick="testLLMAPI()">🚀 LLM API をテスト</button>
+    </div>
+    
+    <div id="status"></div>
+    <div id="results"></div>
+    
+    <script>
+        async function testLLMAPI() {
+            const sentence = document.getElementById('testSentence').value;
+            const statusDiv = document.getElementById('status');
+            const resultsDiv = document.getElementById('results');
+            
+            statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">🔄 LLM API を呼び出し中...</div>';
+            resultsDiv.innerHTML = '';
+            
+            try {
+                // Check if extension is available
+                if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
+                    throw new Error('Chrome extension not detected. Please run this on a webpage where the extension is active.');
+                }
+                
+                // Call actual LLM API
+                const response = await new Promise((resolve, reject) => {
+                    chrome.runtime.sendMessage({
+                        type: 'ANALYZE_TEXT_WITH_LLM',
+                        pageId: 'quick-test',
+                        sentences: [sentence],
+                        paragraphId: 'quick-test-para'
+                    }, (response) => {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error(chrome.runtime.lastError.message));
+                        } else {
+                            resolve(response);
+                        }
+                    });
+                });
+                
+                console.log('📥 Full LLM Response:', response);
+                
+                if (!response || !response.success) {
+                    throw new Error(response?.error || 'API call failed');
+                }
+                
+                // Analyze results
+                const analysis = response.analysis;
+                const inputWords = extractWords(sentence);
+                const foundWords = analysis.words ? analysis.words.map(w => w.word.toLowerCase()) : [];
+                const missingWords = inputWords.filter(word => !foundWords.includes(word));
+                const coverage = ((inputWords.length - missingWords.length) / inputWords.length * 100).toFixed(1);
+                
+                // Display success
+                statusDiv.innerHTML = `
+                    <div class="result">
+                        <h3>✅ LLM API Test Success!</h3>
+                        <div><strong>Input:</strong> "${sentence}"</div>
+                        <div><strong>Words in input:</strong> ${inputWords.length}</div>
+                        <div><strong>Words analyzed:</strong> ${analysis.words ? analysis.words.length : 0}</div>
+                        <div><strong>Coverage:</strong> ${coverage}%</div>
+                        ${missingWords.length > 0 ? `<div><strong>Missing:</strong> ${missingWords.join(', ')}</div>` : ''}
+                    </div>
+                `;
+                
+                // Display word analysis
+                if (analysis.words && analysis.words.length > 0) {
+                    const posAnalysis = analysis.words.map(word => `
+                        <div class="pos-item">
+                            <strong>${word.word}</strong><br>
+                            <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${word.pos}</span><br>
+                            <small>${word.contextual_meaning || word.basic_meaning || 'No meaning provided'}</small>
+                        </div>
+                    `).join('');
+                    
+                    resultsDiv.innerHTML = `
+                        <h3>📝 Word Analysis Results</h3>
+                        <div class="pos-analysis">${posAnalysis}</div>
+                        
+                        <h3>🔍 Raw API Response</h3>
+                        <details>
+                            <summary>Click to view full JSON response</summary>
+                            <pre>${JSON.stringify(response, null, 2)}</pre>
+                        </details>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = '<div class="error">❌ No word analysis found in response</div>';
+                }
+                
+            } catch (error) {
+                console.error('❌ LLM API Test Error:', error);
+                statusDiv.innerHTML = `
+                    <div class="error">
+                        <h3>❌ Test Failed</h3>
+                        <div><strong>Error:</strong> ${error.message}</div>
+                        <div><small>Make sure you're running this on a webpage where the extension is active.</small></div>
+                    </div>
+                `;
+            }
+        }
+        
+        function extractWords(text) {
+            return text.toLowerCase()
+                      .replace(/[.,!?;:"()]/g, '')
+                      .split(/\s+/)
+                      .filter(word => word.length > 0);
+        }
+        
+        // Auto-detect extension
+        window.onload = function() {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                document.body.style.borderTop = '5px solid #28a745';
+                console.log('✅ Chrome extension detected');
+            } else {
+                document.body.style.borderTop = '5px solid #dc3545';
+                console.log('❌ Chrome extension not detected');
+            }
+        };
+    </script>
+</body>
+</html>

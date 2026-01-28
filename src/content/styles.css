@@ -4,7 +4,7 @@
 .ela-noun {
     text-decoration: underline;
     text-decoration-color: #27ae60; /* 緑色 */
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -12,7 +12,7 @@
 .ela-verb {
     text-decoration: underline;
     text-decoration-color: #3498db; /* 青色 */
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -20,7 +20,7 @@
 .ela-adjective {
     text-decoration: underline;
     text-decoration-color: #f39c12;
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -28,7 +28,7 @@
 .ela-adverb {
     text-decoration: underline;
     text-decoration-color: #9b59b6;
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -36,7 +36,7 @@
 .ela-preposition {
     text-decoration: underline;
     text-decoration-color: #8b4513; /* 茶色 */
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -44,7 +44,7 @@
 .ela-pronoun {
     text-decoration: underline;
     text-decoration-color: #e67e22;
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -52,7 +52,7 @@
 .ela-conjunction {
     text-decoration: underline;
     text-decoration-color: #7f8c8d; /* グレー色 */
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -60,7 +60,7 @@
 .ela-determiner {
     text-decoration: underline;
     text-decoration-color: #6c757d; /* ダークグレー色 */
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
 }
@@ -68,9 +68,19 @@
 .ela-other {
     text-decoration: underline;
     text-decoration-color: #95a5a6;
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: 2px;
     text-underline-offset: 2px;
     cursor: pointer;
+}
+
+.ela-pending {
+    text-decoration: underline;
+    text-decoration-color: #bdc3c7; /* 薄いグレー - LLM解析待ち */
+    text-decoration-thickness: 2px;
+    text-underline-offset: 2px;
+    text-decoration-style: dashed; /* 点線で解析待ちを表現 */
+    cursor: pointer;
+    opacity: 0.7;
 }
 
 /* 基本的な単語スタイル */
